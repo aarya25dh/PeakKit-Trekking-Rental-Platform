@@ -1,27 +1,76 @@
+# =========================
 # macOS
+# =========================
 .DS_Store
+.AppleDouble
+.LSOverride
 
+# Finder metadata
+Icon?
+._*
+
+# =========================
 # Python
+# =========================
 __pycache__/
-*.pyc
+**/__pycache__/
+
+*.py[cod]
 *.pyo
 *.pyd
+*.so
 
-# Virtual Environment
+# Python virtual environments
 venv/
 backend/venv/
+.envrc
 
+# Pytest / Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# =========================
 # Django
-backend/media/
-backend/staticfiles/
+# =========================
 backend/db.sqlite3
 
-# Environment Variables
-backend/.env
+# User uploaded media (keep folder, ignore contents)
+backend/media/*
+!backend/media/.gitkeep
 
-# React
+# Collected static files
+backend/staticfiles/*
+!backend/staticfiles/.gitkeep
+
+# Logs
+*.log
+
+# =========================
+# Environment Variables
+# =========================
+backend/.env
+frontend/.env
+.env
+
+# =========================
+# React / Vite
+# =========================
 frontend/node_modules/
 frontend/dist/
+frontend/.vite/
 
+# Build caches
+frontend/.cache/
+
+# =========================
 # VS Code
+# =========================
 .vscode/
+
+# =========================
+# Misc
+# =========================
+*.tmp
+*.swp
+*.swo
