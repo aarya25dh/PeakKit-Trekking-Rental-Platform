@@ -1,3 +1,158 @@
 import { Clock3, Mail, MapPin, Phone, Send } from "lucide-react";
-function Contact() { return <main><section className="bg-[#eef1ec] px-5 py-20 lg:px-8"><div className="mx-auto max-w-7xl"><p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-600">Come say hello</p><h1 className="mt-3 font-display text-5xl font-semibold text-green-950">Let’s plan the next one.</h1><p className="mt-5 max-w-xl text-lg leading-8 text-slate-600">Questions about sizing, pickup, or the right kit for your route? Our Kathmandu team is here to help.</p></div></section><section className="mx-auto max-w-7xl px-5 py-20 lg:px-8"><div className="grid gap-5 sm:grid-cols-3"><div className="rounded-2xl border border-slate-200 bg-white p-6"><MapPin className="text-green-800" /><h2 className="mt-6 font-display text-xl font-semibold">Kathmandu office</h2><p className="mt-2 text-sm leading-6 text-slate-500">Thamel, Kathmandu, Nepal<br />Pickup desk open daily.</p></div><div className="rounded-2xl border border-slate-200 bg-white p-6"><Mail className="text-green-800" /><h2 className="mt-6 font-display text-xl font-semibold">Email us</h2><p className="mt-2 text-sm text-slate-500">hello@peakkit.example<br />We reply within one day.</p></div><div className="rounded-2xl border border-slate-200 bg-white p-6"><Phone className="text-green-800" /><h2 className="mt-6 font-display text-xl font-semibold">Call the team</h2><p className="mt-2 text-sm text-slate-500">+977 9800000000<br />Every day, 8am–6pm.</p></div></div><div className="mt-12 grid gap-10 lg:grid-cols-2"><form className="rounded-2xl border border-slate-200 bg-white p-7 shadow-sm"><h2 className="font-display text-2xl font-semibold text-green-950">Send a message</h2><div className="mt-6 grid gap-4"><input className="rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-green-800" placeholder="Your name" /><input type="email" className="rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-green-800" placeholder="Email address" /><textarea rows="5" className="rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-green-800" placeholder="How can we help?" /><button className="flex items-center justify-center gap-2 rounded-full bg-green-900 px-5 py-3 text-sm font-bold text-white">Send message <Send size={16} /></button></div></form><div><div className="flex items-center gap-2 text-sm font-bold text-green-900"><Clock3 size={17} /> Frequently asked</div><div className="mt-5 grid gap-3">{["Can I collect gear before my trek?", "What happens to my security deposit?", "Do you deliver outside Kathmandu?"] .map((question) => <details key={question} className="rounded-xl border border-slate-200 bg-white p-4 text-sm"><summary className="cursor-pointer font-semibold">{question}</summary><p className="mt-3 leading-6 text-slate-500">Our team will confirm the details for your route and dates before you pay.</p></details>)}</div><div className="mt-6 h-48 rounded-2xl bg-[#dfe8df] p-5 text-sm font-semibold text-green-900">Kathmandu Valley map placeholder</div></div></div></section></main>; }
+
+function Contact() {
+  return (
+    <main>
+      {/* Hero Section */}
+      <section className="bg-[#eef1ec] px-5 py-20 lg:px-8">
+        <div className="mx-auto max-w-7xl">
+          <p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-600">
+            Come say hello
+          </p>
+
+          <h1 className="mt-3 font-display text-5xl font-semibold text-green-950">
+            Let’s plan the next one.
+          </h1>
+
+          <p className="mt-5 max-w-xl text-lg leading-8 text-slate-600">
+            Questions about sizing, pickup, or the right kit for your route? Our
+            Kathmandu team is here to help.
+          </p>
+        </div>
+      </section>
+
+      {/* Contact Section */}
+      <section className="mx-auto max-w-7xl px-5 py-20 lg:px-8">
+        {/* Contact Cards */}
+        <div className="grid gap-5 sm:grid-cols-3">
+          <div className="rounded-2xl border border-slate-200 bg-white p-6">
+            <MapPin className="text-green-800" />
+
+            <h2 className="mt-6 font-display text-xl font-semibold">
+              Kathmandu Office
+            </h2>
+
+            <p className="mt-2 text-sm leading-6 text-slate-500">
+              Thamel, Kathmandu, Nepal
+              <br />
+              Pickup desk open daily.
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-6">
+            <Mail className="text-green-800" />
+
+            <h2 className="mt-6 font-display text-xl font-semibold">
+              Email Us
+            </h2>
+
+            <p className="mt-2 text-sm text-slate-500">
+              inquiry@peakkit.example
+              <br />
+              We reply within one day.
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-6">
+            <Phone className="text-green-800" />
+
+            <h2 className="mt-6 font-display text-xl font-semibold">
+              Call the Team
+            </h2>
+
+            <p className="mt-2 text-sm text-slate-500">
+              +977 9878452210
+              <br />
+              Every day, 8am–6pm.
+            </p>
+          </div>
+        </div>
+
+        {/* Form + FAQ */}
+        <div className="mt-12 grid gap-10 lg:grid-cols-2">
+          {/* Contact Form */}
+          <form className="rounded-2xl border border-slate-200 bg-white p-7 shadow-sm">
+            <h2 className="font-display text-2xl font-semibold text-green-950">
+              Send a Message
+            </h2>
+
+            <div className="mt-6 grid gap-4">
+              <input
+                className="rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-green-800"
+                placeholder="Your name"
+              />
+
+              <input
+                type="email"
+                className="rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-green-800"
+                placeholder="Email address"
+              />
+
+              <textarea
+                rows="5"
+                className="rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-green-800"
+                placeholder="How can we help?"
+              />
+
+              <button className="flex items-center justify-center gap-2 rounded-full bg-green-900 px-5 py-3 text-sm font-bold text-white transition hover:bg-green-800">
+                Send Message <Send size={16} />
+              </button>
+            </div>
+          </form>
+
+          {/* FAQ + Map */}
+          <div>
+            <div className="flex items-center gap-2 text-sm font-bold text-green-900">
+              <Clock3 size={17} />
+              Frequently Asked
+            </div>
+
+            <div className="mt-5 grid gap-3">
+              {[
+                "Can I collect gear before my trek?",
+                "What happens to my security deposit?",
+                "Do you deliver outside Kathmandu?",
+              ].map((question) => (
+                <details
+                  key={question}
+                  className="rounded-xl border border-slate-200 bg-white p-4 text-sm"
+                >
+                  <summary className="cursor-pointer font-semibold">
+                    {question}
+                  </summary>
+
+                  <p className="mt-3 leading-6 text-slate-500">
+                    Our team will confirm the details for your route and dates
+                    before you pay.
+                  </p>
+                </details>
+              ))}
+            </div>
+
+            {/* Google Map */}
+            <div className="mt-6 overflow-hidden rounded-2xl border border-slate-200 shadow-sm">
+              <iframe
+                title="PeakKit Kathmandu Office"
+                src="https://www.google.com/maps?q=Thamel,Kathmandu,Nepal&output=embed"
+                width="100%"
+                height="260"
+                style={{ border: 0 }}
+                allowFullScreen=""
+                loading="lazy"
+                referrerPolicy="no-referrer-when-downgrade"
+              />
+            </div>
+
+            {/* Map Caption */}
+            <div className="mt-3 text-sm text-slate-500">
+              <MapPin size={14} className="mr-1 inline text-green-800" />
+              PeakKit Pickup & Support Center • Thamel, Kathmandu, Nepal
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  );
+}
+
 export default Contact;
