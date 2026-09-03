@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            border-bottom: 2px solid #007bff;
+            padding-bottom: 10px;
+        }
+        .header h1 {
+            color: #007bff;
+            margin: 0;
+        }
+        .content {
+            margin-bottom: 20px;
+        }
+        .button {
+            display: inline-block;
+            padding: 12px 30px;
+            background-color: #007bff;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            margin-top: 20px;
+        }
+        .button:hover {
+            background-color: #0056b3;
+        }
+        .footer {
+            text-align: center;
+            font-size: 12px;
+            color: #666;
+            border-top: 1px solid #ddd;
+            padding-top: 10px;
+            margin-top: 20px;
+        }
+        .warning {
+            background-color: #fff3cd;
+            border: 1px solid #ffc107;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 15px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Welcome to PeakKit!</h1>
+        </div>
+
+        <div class="content">
+            <p>Hi {{ first_name }},</p>
+
+            <p>Thank you for registering with PeakKit. We're excited to have you on board!</p>
+
+            <p>To complete your registration and verify your email address, please click the button below:</p>
+
+            <a href="{{ verification_link }}" class="button">Verify Email</a>
+
+            <p>Or copy and paste this link in your browser:</p>
+            <p><code>{{ verification_link }}</code></p>
+
+            <div class="warning">
+                <strong>Note:</strong> This verification link will expire in {{ expiry_time }}.
+            </div>
+
+            <p>If you didn't create this account, please ignore this email.</p>
+
+            <p>Best regards,<br>
+            The PeakKit Team</p>
+        </div>
+
+        <div class="footer">
+            <p>© 2026 PeakKit. All rights reserved.</p>
+            <p>This is an automated email. Please do not reply to this address.</p>
+        </div>
+    </div>
+</body>
+</html>

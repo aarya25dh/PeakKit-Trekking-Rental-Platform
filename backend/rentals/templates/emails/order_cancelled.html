@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reservation Cancelled</title>
+    <style>
+        body { font-family: 'Arial', sans-serif; color: #333; background: #f4f4f4; }
+        .container { max-width: 600px; margin: 20px auto; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .header { background: linear-gradient(135deg, #6c757d 0%, #495057 100%); color: white; padding: 30px; text-align: center; }
+        .content { padding: 30px; }
+        .button { display: inline-block; background: #667eea; color: white; padding: 12px 30px; text-decoration: none; border-radius: 4px; margin: 20px 0; }
+        .footer { background: #f8f9fa; padding: 20px; text-align: center; font-size: 12px; color: #666; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Reservation Cancelled</h1>
+        </div>
+        <div class="content">
+            <p>Hello <strong>{{ order.customer.first_name }}</strong>,</p>
+            <p>Your PeakKit reservation <strong>{{ order.order_id }}</strong> for {{ order.destination }} has been cancelled.</p>
+            <p><strong>Payment:</strong> {{ order.get_payment_status_display }} — NPR {{ order.total_amount }}</p>
+            <div style="text-align: center;">
+                <a href="{{ frontend_url }}" class="button">Browse PeakKit</a>
+            </div>
+        </div>
+        <div class="footer">
+            <p>© 2026 PeakKit. All rights reserved.</p>
+        </div>
+    </div>
+</body>
+</html>

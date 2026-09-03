@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rider Assigned</title>
+    <style>
+        body { font-family: 'Arial', sans-serif; color: #333; background: #f4f4f4; }
+        .container { max-width: 600px; margin: 20px auto; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .header { background: linear-gradient(135deg, #17a2b8 0%, #0dcaf0 100%); color: white; padding: 30px; text-align: center; }
+        .content { padding: 30px; }
+        .rider-card { background: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 4px solid #17a2b8; margin: 20px 0; }
+        .rider-card h3 { margin-top: 0; color: #17a2b8; }
+        .info-row { display: flex; justify-content: space-between; padding: 8px 0; }
+        .button { display: inline-block; background: #17a2b8; color: white; padding: 12px 30px; text-decoration: none; border-radius: 4px; margin: 20px 0; }
+        .footer { background: #f8f9fa; padding: 20px; text-align: center; font-size: 12px; color: #666; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🏍️ Rider Assigned!</h1>
+        </div>
+        
+        <div class="content">
+            <p>Hello <strong>{{ order.customer.first_name }}</strong>,</p>
+            
+            <p>Excellent news! Your delivery rider has been assigned and your gear is on the way to {{ order.destination }}.</p>
+            
+            {% if order.delivery_partner %}
+            <div class="rider-card">
+                <h3>👤 Your Delivery Rider</h3>
+                <div class="info-row">
+                    <span><strong>Name:</strong></span>
+                    <span>{{ order.delivery_partner.name }}</span>
+                </div>
+                <div class="info-row">
+                    <span><strong>Phone:</strong></span>
+                    <span><a href="tel:{{ order.delivery_partner.phone_number }}">{{ order.delivery_partner.phone_number }}</a></span>
+                </div>
+                <div class="info-row">
+                    <span><strong>Vehicle:</strong></span>
+                    <span>{{ order.delivery_partner.get_vehicle_type_display }} ({{ order.delivery_partner.vehicle_number }})</span>
+                </div>
+                <div class="info-row">
+                    <span><strong>Rating:</strong></span>
+                    <span>⭐ {{ order.delivery_partner.rating }}/5.0</span>
+                </div>
+            </div>
+            {% endif %}
+            
+            <div style="background: #e7f3ff; padding: 15px; border-radius: 4px; margin: 20px 0;">
+                <p><strong>📞 You can contact your rider directly using the phone number above or through the tracking page in the PeakKit app.</strong></p>
+            </div>
+            
+            <div style="text-align: center;">
+                <a href="{{ frontend_url }}/track-order/{{ order.order_id }}" class="button">Live Tracking</a>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p>© 2026 PeakKit. Your adventure partner.</p>
+        </div>
+    </div>
+</body>
+</html>

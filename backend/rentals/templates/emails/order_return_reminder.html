@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Return Reminder</title>
+    <style>
+        body { font-family: 'Arial', sans-serif; color: #333; background: #f4f4f4; }
+        .container { max-width: 600px; margin: 20px auto; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; }
+        .content { padding: 30px; }
+        .button { display: inline-block; background: #667eea; color: white; padding: 12px 30px; text-decoration: none; border-radius: 4px; margin: 20px 0; }
+        .footer { background: #f8f9fa; padding: 20px; text-align: center; font-size: 12px; color: #666; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>⏰ Return Reminder</h1>
+        </div>
+        <div class="content">
+            <p>Hello <strong>{{ order.customer.first_name }}</strong>,</p>
+            <p>Please return your rental gear for order <strong>{{ order.order_id }}</strong> by <strong>{{ order.return_date|date:"M d, Y" }}</strong>.</p>
+            <p><strong>Items:</strong> {{ order.destination }} Adventure Kit<br>
+            <strong>Destination:</strong> {{ order.destination }}<br>
+            <strong>Drop-off:</strong> PeakKit Warehouse, Kathmandu</p>
+            <div style="text-align: center;">
+                <a href="{{ frontend_url }}/track-order/{{ order.order_id }}" class="button">View Order</a>
+            </div>
+        </div>
+        <div class="footer">
+            <p>© 2026 PeakKit. All rights reserved.</p>
+        </div>
+    </div>
+</body>
+</html>

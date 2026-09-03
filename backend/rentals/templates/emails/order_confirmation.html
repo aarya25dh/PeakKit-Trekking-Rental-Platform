@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Order Confirmation</title>
+    <style>
+        body { font-family: 'Arial', sans-serif; line-height: 1.6; color: #333; background: #f4f4f4; }
+        .container { max-width: 600px; margin: 20px auto; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; }
+        .header h1 { margin: 0; font-size: 28px; }
+        .content { padding: 30px; }
+        .order-id { background: #f8f9fa; padding: 15px; border-left: 4px solid #667eea; margin: 20px 0; }
+        .order-id strong { color: #667eea; }
+        .info-section { margin: 25px 0; }
+        .info-section h3 { color: #667eea; margin-top: 0; border-bottom: 2px solid #667eea; padding-bottom: 10px; }
+        .info-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee; }
+        .info-row:last-child { border-bottom: none; }
+        .label { font-weight: bold; color: #666; }
+        .value { color: #333; }
+        .price-section { background: #f8f9fa; padding: 15px; border-radius: 4px; }
+        .price-row { display: flex; justify-content: space-between; padding: 8px 0; }
+        .price-row.total { font-size: 18px; font-weight: bold; color: #667eea; border-top: 2px solid #ddd; padding-top: 10px; margin-top: 10px; }
+        .button { display: inline-block; background: #667eea; color: white; padding: 12px 30px; text-decoration: none; border-radius: 4px; margin: 20px 0; text-align: center; }
+        .footer { background: #f8f9fa; padding: 20px; text-align: center; font-size: 12px; color: #666; }
+        .footer a { color: #667eea; text-decoration: none; }
+        .status-badge { display: inline-block; background: #28a745; color: white; padding: 8px 15px; border-radius: 20px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🏔️ PeakKit Reservation Confirmed</h1>
+        </div>
+        
+        <div class="content">
+            <p>Hello <strong>{{ order.customer.first_name }}</strong>,</p>
+            
+            <p>Thank you for booking with PeakKit! Your adventure kit reservation has been confirmed. We're excited to help you prepare for your mountain journey.</p>
+            
+            <div class="order-id">
+                <strong>Order ID: </strong> {{ order.order_id }}
+            </div>
+            
+            <div class="info-section">
+                <h3>📍 Destination Details</h3>
+                <div class="info-row">
+                    <span class="label">Destination:</span>
+                    <span class="value">{{ order.destination }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="label">Delivery Address:</span>
+                    <span class="value">{{ order.address }}, {{ order.landmark }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="label">Estimated Delivery:</span>
+                    <span class="value">{{ order.estimated_delivery|date:"M d, Y H:i" }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="label">Return Date:</span>
+                    <span class="value">{{ order.return_date|date:"M d, Y" }}</span>
+                </div>
+            </div>
+            
+            <div class="info-section">
+                <h3>💳 Payment Information</h3>
+                <div class="info-row">
+                    <span class="label">Payment Method:</span>
+                    <span class="value">{{ order.get_payment_method_display }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="label">Payment Status:</span>
+                    <span class="status-badge">{{ order.get_payment_status_display }}</span>
+                </div>
+            </div>
+            
+            <div class="info-section">
+                <h3>📦 Order Summary</h3>
+                <div class="price-section">
+                    <div class="price-row">
+                        <span class="label">Subtotal:</span>
+                        <span class="value">NPR {{ order.subtotal }}</span>
+                    </div>
+                    <div class="price-row">
+                        <span class="label">Delivery Charge:</span>
+                        <span class="value">NPR {{ order.delivery_charge }}</span>
+                    </div>
+                    <div class="price-row">
+                        <span class="label">Security Deposit:</span>
+                        <span class="value">NPR {{ order.security_deposit }}</span>
+                    </div>
+                    <div class="price-row total">
+                        <span class="label">Total Amount:</span>
+                        <span class="value">NPR {{ order.total_amount }}</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div style="text-align: center;">
+                <a href="{{ frontend_url }}/track-order/{{ order.order_id }}" class="button">Track Your Order</a>
+            </div>
+            
+            <div class="info-section">
+                <h3>📋 What's Next?</h3>
+                <ol>
+                    <li><strong>Gear Preparation:</strong> We'll sanitize and prepare your gear with utmost care.</li>
+                    <li><strong>Quality Check:</strong> Each item will be inspected for quality and functionality.</li>
+                    <li><strong>Dispatch:</strong> Your order will be packed and handed to our delivery partner.</li>
+                    <li><strong>Delivery:</strong> Our rider will deliver your gear to your specified location.</li>
+                    <li><strong>Adventure:</strong> Enjoy your mountain adventure with confidence!</li>
+                </ol>
+            </div>
+            
+            <p>If you have any questions or need assistance, our support team is available 24/7. You can reach us through the PeakKit app or by replying to this email.</p>
+            
+            <p><strong>Safe travels,<br>The PeakKit Team 🏔️</strong></p>
+        </div>
+        
+        <div class="footer">
+            <p>© 2026 PeakKit. All rights reserved.</p>
+            <p><a href="{{ frontend_url }}">Visit PeakKit</a> | <a href="{{ frontend_url }}/support">Support</a> | <a href="{{ frontend_url }}/about">About Us</a></p>
+            <p>This is an automated email. Please don't reply directly.</p>
+        </div>
+    </div>
+</body>
+</html>

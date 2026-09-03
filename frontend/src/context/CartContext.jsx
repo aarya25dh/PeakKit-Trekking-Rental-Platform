@@ -10,7 +10,32 @@ export function CartProvider({ children }) {
   const updateQuantity = (id, delta) => setItems((current) => current.map((item) => item.id === id ? { ...item, quantity: Math.max(1, item.quantity + delta) } : item));
   const updateDuration = (id, duration) => setItems((current) => current.map((item) => item.id === id ? { ...item, duration: Number(duration) } : item));
   const removeItem = (id) => setItems((current) => current.filter((item) => item.id !== id));
-  const totals = useMemo(() => { const rentalSubtotal = items.reduce((sum, item) => sum + item.rentalPrice * item.duration * item.quantity, 0); const deposits = items.reduce((sum, item) => sum + Number(String(item.deposit).replace(/[^0-9]/g, "")) * item.quantity, 0); return { rentalSubtotal, deposits, deliveryFee: 0, grandTotal: rentalSubtotal + deposits }; }, [items]);
-  return <CartContext.Provider value={{ items, addItem, updateQuantity, updateDuration, removeItem, clearCart: () => setItems([]), pickupDate, returnDate, setPickupDate, setReturnDate, ...totals }}>{children}</CartContext.Provider>;
+  const totals = useMemo(() => {
+    const rentalSubtotal = items.reduce(
+      (sum, item) => sum + (item.rentalPrice || 500) * (item.duration || 7) * (item.quantity || 1),
+      0
+    );
+    const deposits = Math.round(rentalSubtotal * 0.6);
+    return { rentalSubtotal, deposits, deliveryFee: 0, grandTotal: rentalSubtotal + deposits };
+  }, [items]);
+  return (
+    <CartContext.Provider
+      value={{
+        items,
+        addItem,
+        updateQuantity,
+        updateDuration,
+        removeItem,
+        clearCart: () => setItems([]),
+        pickupDate,
+        returnDate,
+        setPickupDate,
+        setReturnDate,
+        ...totals,
+      }}
+    >
+      {children}
+    </CartContext.Provider>
+  );
 }
 export const useCart = () => useContext(CartContext);

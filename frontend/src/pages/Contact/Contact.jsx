@@ -1,25 +1,17 @@
 import { Clock3, Mail, MapPin, Phone, Send } from "lucide-react";
+import PageHero from "../../components/common/PageHero";
+import { HERO_IMAGES } from "../../data/imagePaths";
 
 function Contact() {
   return (
     <main>
       {/* Hero Section */}
-      <section className="bg-[#eef1ec] px-5 py-20 lg:px-8">
-        <div className="mx-auto max-w-7xl">
-          <p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-600">
-            Come say hello
-          </p>
-
-          <h1 className="mt-3 font-display text-5xl font-semibold text-green-950">
-            Let’s plan the next one.
-          </h1>
-
-          <p className="mt-5 max-w-xl text-lg leading-8 text-slate-600">
-            Questions about sizing, pickup, or the right kit for your route? Our
-            Kathmandu team is here to help.
-          </p>
-        </div>
-      </section>
+      <PageHero
+        image={HERO_IMAGES.contactNepal}
+        breadcrumb="PEAKKIT / CONTACT"
+        title="Let's Plan Your Next Adventure"
+        subtitle="Questions about rentals, pickups, destinations or partnerships? PeakKit is here to help."
+      />
 
       {/* Contact Section */}
       <section className="mx-auto max-w-7xl px-5 py-20 lg:px-8">

@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Out for Delivery</title>
+    <style>
+        body { font-family: 'Arial', sans-serif; color: #333; background: #f4f4f4; }
+        .container { max-width: 600px; margin: 20px auto; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; }
+        .content { padding: 30px; }
+        .info-section { margin: 20px 0; }
+        .info-section h3 { color: #667eea; margin-top: 0; border-bottom: 2px solid #667eea; padding-bottom: 10px; }
+        .info-row { display: flex; justify-content: space-between; padding: 8px 0; }
+        .button { display: inline-block; background: #667eea; color: white; padding: 12px 30px; text-decoration: none; border-radius: 4px; margin: 20px 0; }
+        .footer { background: #f8f9fa; padding: 20px; text-align: center; font-size: 12px; color: #666; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚚 Out for Delivery</h1>
+        </div>
+        <div class="content">
+            <p>Hello <strong>{{ order.customer.first_name }}</strong>,</p>
+            <p>Your PeakKit order <strong>{{ order.order_id }}</strong> is on the way to {{ order.destination }}.</p>
+            <div class="info-section">
+                <h3>📦 Order Summary</h3>
+                <div class="info-row"><span>Items:</span><strong>{{ order.destination }} Adventure Kit</strong></div>
+                <div class="info-row"><span>Address:</span><strong>{{ order.address }}</strong></div>
+                <div class="info-row"><span>Payment:</span><strong>{{ order.get_payment_method_display }} — NPR {{ order.total_amount }}</strong></div>
+                {% if order.delivery_partner %}
+                <div class="info-row"><span>Rider:</span><strong>{{ order.delivery_partner.name }} ({{ order.delivery_partner.phone_number }})</strong></div>
+                {% endif %}
+            </div>
+            <div style="text-align: center;">
+                <a href="{{ frontend_url }}/track-order/{{ order.order_id }}" class="button">Track Your Order</a>
+            </div>
+        </div>
+        <div class="footer">
+            <p>© 2026 PeakKit. All rights reserved.</p>
+        </div>
+    </div>
+</body>
+</html>
