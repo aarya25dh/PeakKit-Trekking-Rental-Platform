@@ -337,9 +337,29 @@ class OrderCreateSerializer(serializers.ModelSerializer):
                 rental_end_date=order.rental_end_date,
                 reservation_status='Active' if order.reservation_status == 'Active' else 'Reserved'
             )
+            from django.db import transaction
+            with transaction.atomic():
+                g = Gear.objects.select_for_update().get(pk=gear.pk)
+                if g.quantity_available > 0:
+                    g.quantity_available -= 1
+                    g.quantity_reserved += 1
+                    g.save()
 
         OrderStatusEngine.on_order_created(order, send_external=True)
         return order
+
+
+class GearReturnSerializer(serializers.ModelSerializer):
+    """Serializer for Gear Return & Damage Inspection."""
+    class Meta:
+        from rentals.models import GearReturn
+        model = GearReturn
+        fields = (
+            'id', 'order', 'gear', 'condition_before', 'condition_after',
+            'damage_notes', 'cleaning_required', 'deposit_held', 'damage_fee',
+            'refund_amount', 'inspected_by', 'inspected_at'
+        )
+        read_only_fields = ('id', 'deposit_held', 'refund_amount', 'inspected_at')
 
 
 class OrderStatusUpdateSerializer(serializers.Serializer):
