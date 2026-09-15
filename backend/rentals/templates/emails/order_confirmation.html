@@ -43,10 +43,18 @@
             </div>
             
             <div class="info-section">
-                <h3>📍 Destination Details</h3>
+                <h3>📍 Destination & Rental Period</h3>
                 <div class="info-row">
                     <span class="label">Destination:</span>
                     <span class="value">{{ order.destination }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="label">Rental Period:</span>
+                    <span class="value">{% if order.rental_start_date and order.rental_end_date %}{{ order.rental_start_date|date:"d M Y" }} &rarr; {{ order.rental_end_date|date:"d M Y" }} ({{ order.rental_days }} Rental Days){% else %}7 Rental Days{% endif %}</span>
+                </div>
+                <div class="info-row">
+                    <span class="label">Return Date:</span>
+                    <span class="value">{% if order.rental_end_date %}{{ order.rental_end_date|date:"d M Y" }}{% else %}{{ order.return_date|date:"d M Y" }}{% endif %}</span>
                 </div>
                 <div class="info-row">
                     <span class="label">Delivery Address:</span>
@@ -55,10 +63,6 @@
                 <div class="info-row">
                     <span class="label">Estimated Delivery:</span>
                     <span class="value">{{ order.estimated_delivery|date:"M d, Y H:i" }}</span>
-                </div>
-                <div class="info-row">
-                    <span class="label">Return Date:</span>
-                    <span class="value">{{ order.return_date|date:"M d, Y" }}</span>
                 </div>
             </div>
             

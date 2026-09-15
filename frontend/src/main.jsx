@@ -8,6 +8,7 @@ import { ThemeProvider } from './context/ThemeContext.jsx'
 import { WishlistProvider } from './context/WishlistContext.jsx'
 import { Toaster } from 'react-hot-toast'
 import { PaymentProvider } from './context/PaymentContext.jsx'
+import { NotificationProvider } from './context/NotificationContext.jsx'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
@@ -16,8 +17,10 @@ createRoot(document.getElementById('root')).render(
         <CartProvider>
           <WishlistProvider>
             <PaymentProvider>
-              <App />
-              <Toaster position="top-right" />
+              <NotificationProvider>
+                <App />
+                <Toaster position="top-right" />
+              </NotificationProvider>
             </PaymentProvider>
           </WishlistProvider>
         </CartProvider>

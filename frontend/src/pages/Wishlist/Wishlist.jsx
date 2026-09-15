@@ -1,5 +1,6 @@
 import { Heart, ShoppingBag, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
+import toast from "react-hot-toast";
 import ProductCard from "../../components/cards/ProductCard";
 import PageHero from "../../components/common/PageHero";
 import { HERO_IMAGES } from "../../data/imagePaths";
@@ -10,6 +11,18 @@ function Wishlist() {
   const { items, removeItem, clearWishlist } = useWishlist();
   const { addItem } = useCart();
   const savings = items.reduce((sum, item) => sum + item.rentalPrice * 3, 0);
+
+  const handleMoveToCart = (item) => {
+    addItem(item);
+    removeItem(item.id);
+    toast.success(`${item.name} moved to cart`);
+  };
+
+  const handleMoveAllToCart = () => {
+    items.forEach((item) => addItem(item));
+    clearWishlist();
+    toast.success("All items moved to cart");
+  };
 
   return (
     <main>
@@ -35,7 +48,7 @@ function Wishlist() {
           {items.length > 0 && (
             <div className="flex gap-2">
               <button
-                onClick={() => items.forEach(addItem)}
+                onClick={handleMoveAllToCart}
                 className="flex items-center gap-2 rounded-full bg-green-900 px-4 py-2 text-sm font-bold text-white transition hover:bg-green-800"
               >
                 <ShoppingBag size={15} /> Move all to cart
@@ -54,13 +67,23 @@ function Wishlist() {
             {items.map((item) => (
               <div key={item.id} className="relative">
                 <ProductCard product={item} />
-                <button
-                  onClick={() => removeItem(item.id)}
-                  aria-label={`Remove ${item.name}`}
-                  className="absolute bottom-[75px] right-5 rounded-full bg-white p-2 text-slate-400 shadow hover:text-red-600"
-                >
-                  <Trash2 size={15} />
-                </button>
+                {/* Per-item action buttons overlaid at the bottom of the card */}
+                <div className="absolute bottom-[68px] right-4 flex gap-1.5">
+                  <button
+                    onClick={() => handleMoveToCart(item)}
+                    aria-label={`Add ${item.name} to cart`}
+                    className="flex items-center gap-1 rounded-full bg-green-900 px-3 py-1.5 text-[11px] font-bold text-white shadow hover:bg-green-800 transition"
+                  >
+                    <ShoppingBag size={12} /> Add to cart
+                  </button>
+                  <button
+                    onClick={() => removeItem(item.id)}
+                    aria-label={`Remove ${item.name}`}
+                    className="rounded-full bg-white p-1.5 text-slate-400 shadow hover:text-red-600 transition"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -87,4 +110,3 @@ function Wishlist() {
 }
 
 export default Wishlist;
-

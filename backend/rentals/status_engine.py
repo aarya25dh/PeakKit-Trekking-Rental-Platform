@@ -18,25 +18,33 @@ class OrderStatusEngine:
     Handles order status updates and cascading notifications.
     """
 
+    # Ordered lifecycle progression (index = rank; lower index = earlier stage).
+    # 'cancelled' is a terminal branch handled separately.
+    STATUS_ORDER = [
+        'pending',
+        'confirmed',
+        'packed',
+        'shipped',
+        'out_for_delivery',
+        'delivered',
+    ]
+
+    # Each entry fires exactly once, when order status first reaches `trigger_status`.
+    # Events are never created for stages beyond the current order status.
     TIMELINE = [
         {
             'key': 'reservation',
             'title': 'Reservation Confirmed',
             'icon': 'reservation',
             'description': 'Your reservation has been confirmed.',
-            'statuses': [
-                'pending', 'confirmed', 'packed', 'shipped',
-                'out_for_delivery', 'delivered', 'cancelled',
-            ],
+            'trigger_status': 'pending',
         },
         {
             'key': 'payment',
             'title': 'Payment Verified',
             'icon': 'payment',
             'description': 'Payment has been successfully received.',
-            'statuses': [
-                'confirmed', 'packed', 'shipped', 'out_for_delivery', 'delivered',
-            ],
+            'trigger_status': 'confirmed',
             'payment_statuses': ['paid', 'cod_pending'],
         },
         {
@@ -44,42 +52,42 @@ class OrderStatusEngine:
             'title': 'Gear Sanitized',
             'icon': 'sanitize',
             'description': 'Your gear has been sanitized.',
-            'statuses': ['packed', 'shipped', 'out_for_delivery', 'delivered'],
+            'trigger_status': 'packed',
         },
         {
             'key': 'packed',
             'title': 'Packed At PeakKit Warehouse',
             'icon': 'pack',
             'description': 'Your gear has been packed at PeakKit warehouse.',
-            'statuses': ['packed', 'shipped', 'out_for_delivery', 'delivered'],
+            'trigger_status': 'packed',
         },
         {
             'key': 'rider',
             'title': 'Rider Assigned',
             'icon': 'rider',
             'description': 'Your delivery rider has been assigned.',
-            'statuses': ['shipped', 'out_for_delivery', 'delivered'],
+            'trigger_status': 'shipped',
         },
         {
             'key': 'out_for_delivery',
             'title': 'Out For Delivery',
             'icon': 'delivery',
             'description': 'Your order is on the way to your destination.',
-            'statuses': ['out_for_delivery', 'delivered'],
+            'trigger_status': 'out_for_delivery',
         },
         {
             'key': 'delivered',
             'title': 'Delivered',
             'icon': 'delivered',
             'description': 'Your order has been successfully delivered.',
-            'statuses': ['delivered'],
+            'trigger_status': 'delivered',
         },
         {
             'key': 'return',
             'title': 'Return Reminder',
             'icon': 'return',
             'description': 'Please return your rental gear by the due date.',
-            'statuses': ['delivered'],
+            'trigger_status': 'delivered',
             'rentals_only': True,
         },
     ]
@@ -154,41 +162,71 @@ class OrderStatusEngine:
     def update_order_status(order, new_status, payment_status=None, delivery_partner=None, send_external=True):
         """
         Update order status and trigger tracking, notifications, email, and WhatsApp.
-        External send failures never roll back the status change.
+        Database operations (order, tracking, notifications, delivery partner) are atomic.
+        External notifications (email, WhatsApp) run after commit and never break DB state.
         """
+        from django.db import transaction
+
         old_status = order.order_status
-        order.order_status = new_status
+        status_changed = (old_status != new_status)
 
-        if payment_status:
-            order.payment_status = payment_status
+        with transaction.atomic():
+            order.order_status = new_status
 
-        if delivery_partner:
-            order.delivery_partner = delivery_partner
+            if payment_status:
+                order.payment_status = payment_status
 
-        if new_status in OrderStatusEngine.ASSIGN_PARTNER_STATUSES:
-            OrderStatusEngine.assign_delivery_partner(order, persist=False)
-        elif new_status in OrderStatusEngine.RELEASE_PARTNER_STATUSES:
-            OrderStatusEngine.release_delivery_partner(order, persist=False)
+            if delivery_partner:
+                order.delivery_partner = delivery_partner
 
-        order.save()
+            if new_status in OrderStatusEngine.ASSIGN_PARTNER_STATUSES:
+                OrderStatusEngine.assign_delivery_partner(order, persist=False)
+            elif new_status in OrderStatusEngine.RELEASE_PARTNER_STATUSES:
+                OrderStatusEngine.release_delivery_partner(order, persist=False)
 
-        OrderStatusEngine.sync_tracking_events(order)
-        OrderStatusEngine._create_status_notifications(order, new_status)
+            order.save()
 
-        if send_external:
-            OrderStatusEngine._notify_status_side_effects(order, new_status, send_external=True)
+            OrderStatusEngine.sync_tracking_events(order)
+            OrderStatusEngine._create_status_notifications(order, new_status)
+
+        if send_external and status_changed:
+            try:
+                OrderStatusEngine._notify_status_side_effects(order, new_status, send_external=True)
+            except Exception as e:
+                logger.error(f"Error dispatching external notifications for order {order.order_id}: {str(e)}")
 
         logger.info(f'Order {order.order_id} status updated from {old_status} to {new_status}')
         return True
 
     @staticmethod
     def sync_tracking_events(order):
-        """Create missing timeline events for the current order status. Never duplicate titles."""
+        """
+        Create tracking events for all lifecycle stages up to (and including)
+        the current order status.  Never creates future events.  Never duplicates.
+
+        Logic:
+          - Each TIMELINE entry has a `trigger_status` — the first status at which
+            that event should appear.
+          - We compute the rank of the current status in STATUS_ORDER.
+          - We only create an entry when trigger_status rank <= current rank.
+          - `get_or_create` guarantees idempotency (no duplicates).
+          - 'cancelled' is a terminal branch handled at the end.
+        """
+        current_rank = OrderStatusEngine._status_rank(order.order_status)
+
         for event in OrderStatusEngine.TIMELINE:
-            if order.order_status not in event['statuses']:
+            trigger = event['trigger_status']
+            trigger_rank = OrderStatusEngine._status_rank(trigger)
+
+            # Skip events that belong to future stages.
+            if trigger_rank > current_rank:
                 continue
+
+            # Skip payment event if payment hasn't been confirmed.
             if event.get('payment_statuses') and order.payment_status not in event['payment_statuses']:
                 continue
+
+            # Skip return-reminder if no return date (purchase, not rental).
             if event.get('rentals_only') and not order.return_date:
                 continue
 
@@ -212,6 +250,14 @@ class OrderStatusEngine:
                     'completed': True,
                 },
             )
+
+    @staticmethod
+    def _status_rank(status):
+        """Return the progression rank of a status (lower = earlier). Unknown statuses get rank -1."""
+        try:
+            return OrderStatusEngine.STATUS_ORDER.index(status)
+        except ValueError:
+            return -1
 
     @staticmethod
     def assign_delivery_partner(order, persist=True):
@@ -325,7 +371,7 @@ class OrderStatusEngine:
 
         OrderStatusEngine._send_customer_whatsapp(order, status, notification_data)
 
-        if status in ('shipped', 'out_for_delivery') and order.delivery_partner:
+        if status in ('packed', 'shipped', 'out_for_delivery') and order.delivery_partner:
             OrderStatusEngine._send_rider_whatsapp(order, notification_data)
 
     @staticmethod
@@ -351,7 +397,13 @@ class OrderStatusEngine:
             'vehicle_type': order.delivery_partner.get_vehicle_type_display() if order.delivery_partner else 'N/A',
             'rider_rating': order.delivery_partner.rating if order.delivery_partner else '5.0',
             'estimated_delivery': order.estimated_delivery.strftime('%Y-%m-%d %H:%M') if order.estimated_delivery else 'N/A',
-            'return_date': order.return_date.strftime('%Y-%m-%d') if order.return_date else 'N/A',
+            'return_date': order.return_date.strftime('%Y-%m-%d') if order.return_date else (order.rental_end_date.strftime('%Y-%m-%d') if order.rental_end_date else 'N/A'),
+            'rental_start_date': order.rental_start_date.strftime('%d %b %Y') if order.rental_start_date else 'N/A',
+            'rental_end_date': order.rental_end_date.strftime('%d %b %Y') if order.rental_end_date else 'N/A',
+            'rental_days': order.rental_days,
+            'rental_period': f"{order.rental_start_date.strftime('%d %b %Y')} → {order.rental_end_date.strftime('%d %b %Y')}" if order.rental_start_date and order.rental_end_date else 'N/A',
+            'return_date_display': order.rental_end_date.strftime('%d %b %Y') if order.rental_end_date else (order.return_date.strftime('%d %b %Y') if order.return_date else 'N/A'),
+            'reservation_status': order.reservation_status,
             'transaction_id': order.transaction_id or 'N/A',
             'cod_amount': order.total_amount if order.payment_method == 'cod' else None,
         }
@@ -360,6 +412,17 @@ class OrderStatusEngine:
     def _send_email_notification(order, template_name, context):
         """Send email notification. Failures are logged and never raised."""
         try:
+            # Always resolve the real customer email from the authenticated user record.
+            # Fall back to order.customer_email only if the relation is unavailable.
+            try:
+                recipient_email = order.customer.email or order.customer_email
+            except Exception:
+                recipient_email = order.customer_email
+
+            if not recipient_email or '@' not in recipient_email:
+                logger.warning(f'Skipping email for order {order.order_id}: no valid recipient address')
+                return
+
             email_context = dict(context)
             email_context['order'] = order
             email_context['frontend_url'] = settings.FRONTEND_URL
@@ -370,36 +433,61 @@ class OrderStatusEngine:
                 subject=f'PeakKit Order Update: {order.order_id}',
                 message='',
                 from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[order.customer_email],
+                recipient_list=[recipient_email],
                 html_message=html_message,
                 fail_silently=True,
             )
-            logger.info(f'Email sent for order {order.order_id} ({template_name})')
+            logger.info(f'Email sent to {recipient_email} for order {order.order_id} ({template_name})')
         except Exception as e:
             logger.error(f'Failed to send email for order {order.order_id}: {str(e)}')
 
     @staticmethod
     def _send_customer_whatsapp(order, status, notification_data):
-        """Send WhatsApp notification to customer."""
+        """Send WhatsApp notification to customer for all lifecycle statuses."""
         try:
-            if not order.customer_phone:
+            # Phone number priority:
+            # 1. order.customer_phone (from request phone_number / customer_phone)
+            # 2. request.user.profile.phone_number
+            # 3. Skip gracefully with warning log
+            phone = getattr(order, 'customer_phone', None)
+            if not phone:
+                try:
+                    phone = order.customer.profile.phone_number
+                except Exception:
+                    pass
+            if not phone:
+                logger.warning(f'Skipping WhatsApp for order {order.order_id}: no customer phone found')
                 return
+
+            # Status mapping
             if status in ('pending', 'confirmed'):
-                whatsapp_service.send_order_confirmation(order.customer_phone, notification_data)
-            if status == 'paid' or (
-                status == 'confirmed' and order.payment_status in ('paid', 'cod_pending')
-            ):
-                whatsapp_service.send_payment_confirmation(order.customer_phone, notification_data)
-            elif status == 'shipped':
-                whatsapp_service.send_rider_assigned(order.customer_phone, notification_data)
+                result = whatsapp_service.send_order_confirmation(phone, notification_data)
+                logger.info(f'WhatsApp API response (order_confirmation, {order.order_id}): {result}')
+                if order.payment_status in ('paid', 'cod_pending'):
+                    result = whatsapp_service.send_payment_confirmation(phone, notification_data)
+                    logger.info(f'WhatsApp API response (payment_confirmation, {order.order_id}): {result}')
+            elif status in ('packed', 'shipped'):
+                if order.delivery_partner:
+                    result = whatsapp_service.send_rider_assigned(phone, notification_data)
+                    logger.info(f'WhatsApp API response (rider_assigned, {order.order_id}): {result}')
+                else:
+                    result = whatsapp_service.send_order_status_update(phone, order.order_id, status, notification_data)
+                    logger.info(f'WhatsApp API response (status_update/{status}, {order.order_id}): {result}')
+            elif status == 'out_for_delivery':
+                result = whatsapp_service.send_order_status_update(phone, order.order_id, 'out_for_delivery', notification_data)
+                logger.info(f'WhatsApp API response (status_update/out_for_delivery, {order.order_id}): {result}')
             elif status == 'delivered':
-                whatsapp_service.send_delivery_confirmation(order.customer_phone, notification_data)
-            elif status not in ('pending', 'confirmed', 'cancelled'):
-                message = (
-                    f"PeakKit {order.order_id}: Your order status is now "
-                    f"{order.get_order_status_display()}."
-                )
-                whatsapp_service.send_text_message(order.customer_phone, message)
+                result = whatsapp_service.send_delivery_confirmation(phone, notification_data)
+                logger.info(f'WhatsApp API response (delivery_confirmation, {order.order_id}): {result}')
+                if order.return_date:
+                    result = whatsapp_service.send_return_reminder(phone, notification_data)
+                    logger.info(f'WhatsApp API response (return_reminder, {order.order_id}): {result}')
+            elif status == 'cancelled':
+                result = whatsapp_service.send_order_status_update(phone, order.order_id, 'cancelled', notification_data)
+                logger.info(f'WhatsApp API response (status_update/cancelled, {order.order_id}): {result}')
+            else:
+                result = whatsapp_service.send_order_status_update(phone, order.order_id, status, notification_data)
+                logger.info(f'WhatsApp API response (status_update/{status}, {order.order_id}): {result}')
         except Exception as e:
             logger.error(f'Failed to send WhatsApp to customer for order {order.order_id}: {str(e)}')
 
@@ -410,6 +498,11 @@ class OrderStatusEngine:
             if not order.delivery_partner:
                 return
             phone = order.delivery_partner.whatsapp_number or order.delivery_partner.phone_number
-            whatsapp_service.send_rider_notification(phone, notification_data)
+            if not phone:
+                logger.warning(f'Skipping rider WhatsApp for order {order.order_id}: no rider phone found')
+                return
+            result = whatsapp_service.send_rider_notification(phone, notification_data)
+            logger.info(f'WhatsApp API response (rider_notification, {order.order_id}): {result}')
         except Exception as e:
             logger.error(f'Failed to send WhatsApp to rider for order {order.order_id}: {str(e)}')
+

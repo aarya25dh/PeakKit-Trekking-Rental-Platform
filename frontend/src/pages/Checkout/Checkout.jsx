@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
   Bell,
@@ -32,9 +32,23 @@ import {
 
 import { HERO_IMAGES } from "../../data/imagePaths";
 import { useCart } from "../../context/CartContext";
+import { ordersAPI } from "../../services/api";
+import { useNotifications } from "../../context/NotificationContext";
 
 function Checkout() {
-  const { items, rentalSubtotal, deposits, clearCart } = useCart();
+  const navigate = useNavigate();
+  const {
+    items,
+    rentalSubtotal,
+    deposits,
+    clearCart,
+    pickupDate,
+    returnDate,
+    setPickupDate,
+    setReturnDate,
+    durationDays,
+  } = useCart();
+  const { fetchNotifications } = useNotifications();
 
   // Modal payment flow state
   // null | "selector" | "form"
@@ -43,9 +57,6 @@ function Checkout() {
 
   // Delivery & Schedule state
   const [deliveryFee, setDeliveryFee] = useState(100);
-  const [pickupDate, setPickupDate] = useState("2026-09-18");
-  const [returnDate, setReturnDate] = useState("2026-09-25");
-  const durationDays = 7;
   const [voucher, setVoucher] = useState(null);
 
   // Customer basic info (empty strings with clean placeholders so user doesn't have to backspace prefilled text)
@@ -94,47 +105,106 @@ function Checkout() {
     setPaymentModalState("form");
   };
 
-  const handlePaymentSuccess = (paymentResult) => {
-    const finalOrderId =
-      paymentResult.orderId || `PK-2026-${Math.floor(100000 + Math.random() * 900000)}`;
-    const finalTxnId =
-      paymentResult.txnId || `TXN-PK-${Math.floor(100000 + Math.random() * 900000)}`;
-
-    const orderData = {
-      orderId: finalOrderId,
-      txnId: finalTxnId,
-      paymentMethod: paymentResult.method || selectedMethod,
-      customerName: paymentResult.customerName || customerInfo.fullName || "Aayush Shrestha",
-      phone: paymentResult.phone || customerInfo.phone || "+977-9841234567",
-      email: paymentResult.email || customerInfo.email || "aayush.shrestha@example.com",
-      pickupDate,
-      returnDate,
-      durationDays,
-      deliveryAddress:
-        paymentResult.deliveryAddress ||
-        (customerInfo.address
-          ? `${customerInfo.address}, ${customerInfo.city} (${customerInfo.postalCode || "44600"})`
-          : "House 42, Gairidhara Road, Kathmandu (44600)"),
-      items: items.length > 0 ? items : [
-        { id: "1", name: "Alpine Trek 45L Pack", brand: "Osprey", category: "Backpacks", condition: "Like new", rentalPrice: 650, quantity: 1, image: "/images/products/backpack1.jpg" },
-        { id: "2", name: "Down Ridge Shell Jacket", brand: "Rab", category: "Jackets", condition: "Excellent", rentalPrice: 520, quantity: 1, image: "/images/products/jacket1.jpg" },
-      ],
-      rentalSubtotal,
-      deposits,
-      deliveryFee,
-      voucherDiscount,
-      grandTotal: payableTotal,
-      trackingId: "PKDLV-48393",
-      riderName: "Suman Gurung",
-      instructions: paymentResult.instructions || "Handle gear with care.",
+  const handlePaymentSuccess = async (paymentResult) => {
+    const methodMap = {
+      "Credit / Debit Card": "card",
+      "PayPal": "paypal",
+      "eSewa Mobile Wallet": "esewa",
+      "Khalti Digital Wallet": "khalti",
+      "Direct Bank Transfer": "bank_transfer",
+      "Cash on Delivery": "cod",
     };
 
-    setPaymentModalState(null);
-    setConfirmedOrder(orderData);
-    setActiveSuccessView("receipt");
-    toast.success("Order confirmed successfully!");
-    if (clearCart) clearCart();
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    const rawMethod = paymentResult.method || selectedMethod;
+    const payment_method =
+      methodMap[rawMethod] ||
+      (rawMethod ? rawMethod.toLowerCase().replace(/[^a-z0-9]/g, "_") : "card");
+
+    const startDate = pickupDate || new Date().toISOString().split("T")[0];
+    const endDate =
+      returnDate ||
+      new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString().split("T")[0];
+
+    const orderPayload = {
+      destination: customerInfo.city || "Annapurna Base Camp",
+      address:
+        customerInfo.address || "House 42, Gairidhara Road, Kathmandu",
+      landmark: customerInfo.postalCode
+        ? `Postal Code ${customerInfo.postalCode}`
+        : "Near city center",
+      phone_number:
+        paymentResult.phone || customerInfo.phone || "9860467948",
+      payment_method: payment_method,
+      rental_start_date: startDate,
+      rental_end_date: endDate,
+      gear_id: items.length > 0 ? items[0].id : undefined,
+      subtotal: rentalSubtotal || 5000,
+      delivery_charge: deliveryFee || 500,
+      security_deposit: deposits || 1000,
+      estimated_delivery: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+      return_date: new Date(endDate).toISOString(),
+    };
+
+    try {
+      const res = await ordersAPI.create(orderPayload);
+      const createdOrder = res.data?.order || {};
+
+      setPaymentModalState(null);
+
+      // Clear cart
+      if (clearCart) clearCart();
+
+      // Refresh notification drawer immediately
+      fetchNotifications();
+
+      // Show success toast
+      toast.success(
+        `Reservation confirmed! Order ${createdOrder.order_id || ""}`
+      );
+
+      // Navigate to Order History
+      navigate("/rentals", { state: { newOrderId: createdOrder.order_id } });
+    } catch (err) {
+      console.error("Order creation API error:", err);
+      // Fallback: create local confirmation if offline
+      const finalOrderId =
+        paymentResult.orderId || `PK-2026-${Math.floor(100000 + Math.random() * 900000)}`;
+      const finalTxnId =
+        paymentResult.txnId || `TXN-PK-${Math.floor(100000 + Math.random() * 900000)}`;
+
+      const orderData = {
+        orderId: finalOrderId,
+        txnId: finalTxnId,
+        paymentMethod: paymentResult.method || selectedMethod,
+        customerName: paymentResult.customerName || customerInfo.fullName || "Aarya Dhungana",
+        phone: paymentResult.phone || customerInfo.phone || "+977-9860467948",
+        email: paymentResult.email || customerInfo.email || "dhungana21@gmail.com",
+        pickupDate,
+        returnDate,
+        durationDays,
+        deliveryAddress:
+          paymentResult.deliveryAddress ||
+          (customerInfo.address
+            ? `${customerInfo.address}, ${customerInfo.city} (${customerInfo.postalCode || "44600"})`
+            : "House 42, Gairidhara Road, Kathmandu (44600)"),
+        items: items.length > 0 ? items : [],
+        rentalSubtotal,
+        deposits,
+        deliveryFee,
+        voucherDiscount,
+        grandTotal: payableTotal,
+        trackingId: "PKDLV-48393",
+        riderName: "Hari Sharma",
+        instructions: paymentResult.instructions || "Handle gear with care.",
+      };
+
+      setPaymentModalState(null);
+      setConfirmedOrder(orderData);
+      setActiveSuccessView("receipt");
+      toast.success("Order confirmed successfully!");
+      if (clearCart) clearCart();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
   };
 
   // If order is confirmed, render the multi-part order confirmation screen

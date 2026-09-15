@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Order, TrackingEvent, DeliveryPartner
+from .models import Order, TrackingEvent, DeliveryPartner, Gear, RentalReservation, CartItem
 
 
 @admin.register(DeliveryPartner)
@@ -33,13 +33,25 @@ class TrackingEventInline(admin.TabularInline):
     fields = ('title', 'description', 'icon', 'completed', 'timestamp')
 
 
+class RentalReservationInline(admin.TabularInline):
+    model = RentalReservation
+    extra = 0
+    fields = ('gear', 'rental_start_date', 'rental_end_date', 'reservation_status')
+
+
 @admin.register(Order)
 class OrderAdmin(admin.ModelAdmin):
-    list_display = ('order_id', 'customer', 'destination', 'order_status', 'payment_status', 'total_amount', 'created_at')
-    list_filter = ('order_status', 'payment_status', 'payment_method', 'created_at')
+    list_display = (
+        'order_id', 'customer', 'destination', 'rental_start_date',
+        'rental_end_date', 'rental_days', 'return_date', 'reservation_status'
+    )
+    list_filter = (
+        'reservation_status', 'order_status', 'payment_status',
+        'rental_start_date', 'rental_end_date', 'created_at'
+    )
     search_fields = ('order_id', 'customer__email', 'destination')
-    readonly_fields = ('order_id', 'created_at', 'updated_at', 'customer_email')
-    inlines = [TrackingEventInline]
+    readonly_fields = ('order_id', 'created_at', 'updated_at', 'customer_email', 'rental_days')
+    inlines = [TrackingEventInline, RentalReservationInline]
     
     fieldsets = (
         ('Order Info', {
@@ -47,6 +59,9 @@ class OrderAdmin(admin.ModelAdmin):
         }),
         ('Customer Details', {
             'fields': ('customer_email', 'customer_phone')
+        }),
+        ('Rental Duration & Schedule', {
+            'fields': ('rental_start_date', 'rental_end_date', 'rental_days', 'daily_rental_price', 'reservation_status')
         }),
         ('Delivery Info', {
             'fields': ('destination', 'address', 'landmark', 'delivery_partner', 'estimated_delivery')
@@ -67,10 +82,36 @@ class OrderAdmin(admin.ModelAdmin):
     )
 
 
+@admin.register(Gear)
+class GearAdmin(admin.ModelAdmin):
+    list_display = ('gear_id', 'name', 'category', 'brand', 'daily_rental_price', 'created_at')
+    list_filter = ('category', 'brand')
+    search_fields = ('gear_id', 'name', 'category', 'brand')
+
+
+@admin.register(RentalReservation)
+class RentalReservationAdmin(admin.ModelAdmin):
+    list_display = ('gear', 'order', 'rental_start_date', 'rental_end_date', 'reservation_status')
+    list_filter = ('reservation_status', 'rental_start_date', 'rental_end_date')
+    search_fields = (
+        'order__destination', 'order__customer__email', 'order__customer__first_name',
+        'order__customer__last_name', 'gear__name', 'gear__gear_id'
+    )
+    ordering = ('rental_start_date', 'rental_end_date')
+
+
+@admin.register(CartItem)
+class CartItemAdmin(admin.ModelAdmin):
+    list_display = ('item_id', 'user', 'name', 'rental_start_date', 'rental_end_date', 'rental_days', 'subtotal', 'total_amount')
+    list_filter = ('rental_start_date', 'rental_end_date')
+    search_fields = ('item_id', 'name', 'user__email')
+
+
 @admin.register(TrackingEvent)
 class TrackingEventAdmin(admin.ModelAdmin):
     list_display = ('order', 'title', 'icon', 'completed', 'timestamp')
     list_filter = ('icon', 'completed', 'timestamp')
     search_fields = ('order__order_id', 'title')
     readonly_fields = ('timestamp',)
+
 
