@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Order, TrackingEvent, DeliveryPartner, Gear, RentalReservation, CartItem
+from .models import Order, TrackingEvent, DeliveryPartner, Gear, RentalReservation, CartItem, GearReturn
 
 
 @admin.register(DeliveryPartner)
@@ -39,6 +39,18 @@ class RentalReservationInline(admin.TabularInline):
     fields = ('gear', 'rental_start_date', 'rental_end_date', 'reservation_status')
 
 
+class GearReturnInline(admin.StackedInline):
+    model = GearReturn
+    extra = 0
+    readonly_fields = ('inspected_at', 'refund_amount')
+    fields = (
+        'gear', ('condition_before', 'condition_after'),
+        'damage_notes', 'cleaning_required',
+        ('deposit_held', 'damage_fee', 'refund_amount'),
+        'inspected_by', 'inspected_at'
+    )
+
+
 @admin.register(Order)
 class OrderAdmin(admin.ModelAdmin):
     list_display = (
@@ -51,7 +63,7 @@ class OrderAdmin(admin.ModelAdmin):
     )
     search_fields = ('order_id', 'customer__email', 'destination')
     readonly_fields = ('order_id', 'created_at', 'updated_at', 'customer_email', 'rental_days')
-    inlines = [TrackingEventInline, RentalReservationInline]
+    inlines = [TrackingEventInline, RentalReservationInline, GearReturnInline]
     
     fieldsets = (
         ('Order Info', {
@@ -84,9 +96,38 @@ class OrderAdmin(admin.ModelAdmin):
 
 @admin.register(Gear)
 class GearAdmin(admin.ModelAdmin):
-    list_display = ('gear_id', 'name', 'category', 'brand', 'daily_rental_price', 'created_at')
-    list_filter = ('category', 'brand')
-    search_fields = ('gear_id', 'name', 'category', 'brand')
+    list_display = (
+        'sku', 'name', 'category', 'size', 'condition', 'daily_rental_price',
+        'quantity_total', 'quantity_available', 'quantity_reserved',
+        'quantity_under_maintenance', 'inspection_due'
+    )
+    list_filter = ('category', 'condition', 'size', 'inspection_due')
+    search_fields = ('sku', 'gear_id', 'name', 'category', 'brand')
+    ordering = ('quantity_available', 'inspection_due', '-created_at')
+    inlines = [RentalReservationInline]
+
+    fieldsets = (
+        ('Gear Identification', {
+            'fields': ('gear_id', 'sku', 'name', 'category', 'brand')
+        }),
+        ('Specifications & Pricing', {
+            'fields': ('size', 'condition', 'purchase_price', 'daily_rental_price')
+        }),
+        ('Inventory Counts', {
+            'fields': (
+                'quantity_total', 'quantity_available',
+                'quantity_reserved', 'quantity_under_maintenance'
+            )
+        }),
+        ('Maintenance & Inspection', {
+            'fields': ('sanitized_at', 'inspection_due')
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+    readonly_fields = ('created_at', 'updated_at')
 
 
 @admin.register(RentalReservation)
@@ -94,10 +135,24 @@ class RentalReservationAdmin(admin.ModelAdmin):
     list_display = ('gear', 'order', 'rental_start_date', 'rental_end_date', 'reservation_status')
     list_filter = ('reservation_status', 'rental_start_date', 'rental_end_date')
     search_fields = (
-        'order__destination', 'order__customer__email', 'order__customer__first_name',
-        'order__customer__last_name', 'gear__name', 'gear__gear_id'
+        'order__order_id', 'order__destination', 'order__customer__email',
+        'order__customer__first_name', 'order__customer__last_name',
+        'gear__name', 'gear__gear_id', 'gear__sku'
     )
+    date_hierarchy = 'rental_start_date'
     ordering = ('rental_start_date', 'rental_end_date')
+
+
+@admin.register(GearReturn)
+class GearReturnAdmin(admin.ModelAdmin):
+    list_display = (
+        'order', 'gear', 'condition_before', 'condition_after',
+        'deposit_held', 'damage_fee', 'refund_amount',
+        'cleaning_required', 'inspected_by', 'inspected_at'
+    )
+    list_filter = ('condition_after', 'cleaning_required', 'inspected_at')
+    search_fields = ('order__order_id', 'gear__name', 'gear__sku', 'inspected_by__email')
+    readonly_fields = ('inspected_at', 'refund_amount')
 
 
 @admin.register(CartItem)

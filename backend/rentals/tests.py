@@ -593,3 +593,273 @@ class RentalDurationAndAvailabilityEngineTests(TestCase):
         )
 
 
+@override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend')
+class InventoryAndAdminManagementTests(TestCase):
+    """Sprint 3.4B: Inventory, return/damage workflow, admin analytics, and CSV exports."""
+
+    def setUp(self):
+        from rentals.models import Gear, GearReturn, RentalReservation
+        self.client = APIClient()
+        self.staff_user = User.objects.create_user(
+            username='staffuser',
+            email='staff@peakkit.com',
+            password='Test@1234',
+            first_name='Staff',
+            is_staff=True,
+        )
+        self.normal_user = User.objects.create_user(
+            username='normaluser',
+            email='normal@peakkit.com',
+            password='Test@1234',
+            first_name='Normal',
+            is_staff=False,
+        )
+        Profile.objects.get_or_create(user=self.staff_user)
+        Profile.objects.get_or_create(user=self.normal_user)
+
+        self.gear = Gear.objects.create(
+            gear_id='gear-tent-4p',
+            name='Himalayan 4-Season Tent',
+            category='Tents',
+            brand='PeakKit',
+            daily_rental_price=Decimal('1000.00'),
+            purchase_price=Decimal('25000.00'),
+            quantity_total=5,
+            quantity_available=5,
+            quantity_reserved=0,
+            quantity_under_maintenance=0,
+        )
+
+    def test_gear_sku_generation_and_properties(self):
+        """SKU is generated automatically if blank, and rental_price_per_day alias works."""
+        self.assertTrue(self.gear.sku.startswith('GEAR-'))
+        self.assertEqual(self.gear.rental_price_per_day, Decimal('1000.00'))
+        self.gear.rental_price_per_day = Decimal('1200.00')
+        self.assertEqual(self.gear.daily_rental_price, Decimal('1200.00'))
+
+    def test_inventory_deduction_on_order_reservation(self):
+        """Creating an order with gear decrements quantity_available and increments quantity_reserved."""
+        self.client.force_authenticate(user=self.normal_user)
+        initial_avail = self.gear.quantity_available
+        initial_res = self.gear.quantity_reserved
+
+        res = self.client.post('/api/orders/create/', {
+            'destination': 'Gosaikunda Trek',
+            'address': 'Dhunche',
+            'gear_id': self.gear.gear_id,
+            'rental_start_date': '2026-11-10',
+            'rental_end_date': '2026-11-15',
+            'daily_rental_price': '1000.00',
+            'security_deposit': '3000.00',
+            'payment_method': 'card',
+        }, format='json')
+
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.gear.refresh_from_db()
+        self.assertEqual(self.gear.quantity_available, initial_avail - 1)
+        self.assertEqual(self.gear.quantity_reserved, initial_res + 1)
+
+    def test_inventory_restoration_on_return(self):
+        """Returning an order restores inventory idempotently."""
+        self.client.force_authenticate(user=self.normal_user)
+        # Create order
+        res = self.client.post('/api/orders/create/', {
+            'destination': 'Helambu',
+            'address': 'Sundarijal',
+            'gear_id': self.gear.gear_id,
+            'rental_start_date': '2026-11-01',
+            'rental_end_date': '2026-11-05',
+            'daily_rental_price': '1000.00',
+            'security_deposit': '2000.00',
+            'payment_method': 'card',
+        }, format='json')
+        order_id = res.json()['order']['order_id']
+        self.gear.refresh_from_db()
+        self.assertEqual(self.gear.quantity_reserved, 1)
+
+        # Return order
+        return_res = self.client.patch(f'/api/orders/{order_id}/return/', {
+            'condition': 'good'
+        }, format='json')
+        self.assertEqual(return_res.status_code, status.HTTP_200_OK)
+
+        self.gear.refresh_from_db()
+        self.assertEqual(self.gear.quantity_reserved, 0)
+        self.assertEqual(self.gear.quantity_available, 5)
+
+        # Repeating return should not restore inventory again (idempotent)
+        repeat_res = self.client.patch(f'/api/orders/{order_id}/return/', {
+            'condition': 'good'
+        }, format='json')
+        self.assertEqual(repeat_res.status_code, status.HTTP_200_OK)
+        self.gear.refresh_from_db()
+        self.assertEqual(self.gear.quantity_available, 5)
+        self.assertEqual(self.gear.quantity_reserved, 0)
+
+    def test_gear_return_damage_fee_and_refund_calculation(self):
+        """GearReturn calculates refund = deposit - fee, minimum 0."""
+        from rentals.models import GearReturn
+        order = Order.objects.create(
+            customer=self.normal_user,
+            customer_email=self.normal_user.email,
+            destination='Manaslu',
+            address='Gorkha',
+            security_deposit=Decimal('2000.00'),
+            total_amount=Decimal('5000.00'),
+            rental_start_date='2026-10-01',
+            rental_end_date='2026-10-06',
+            rental_days=5,
+        )
+
+        # Case 1: Partial damage
+        ret1 = GearReturn.objects.create(
+            order=order,
+            gear=self.gear,
+            deposit_held=Decimal('2000.00'),
+            damage_fee=Decimal('500.00'),
+        )
+        self.assertEqual(ret1.refund_amount, Decimal('1500.00'))
+
+        # Case 2: Damage fee exceeds deposit -> refund must be 0, never negative
+        ret1.damage_fee = Decimal('3000.00')
+        ret1.save()
+        self.assertEqual(ret1.refund_amount, Decimal('0.00'))
+
+    def test_inspection_endpoint_staff_only_and_damage_fee(self):
+        """POST /api/orders/<order_id>/inspect/ is staff-only, updates GearReturn and inventory."""
+        order = Order.objects.create(
+            customer=self.normal_user,
+            customer_email=self.normal_user.email,
+            destination='Langtang',
+            address='Syabrubesi',
+            security_deposit=Decimal('3000.00'),
+            total_amount=Decimal('8000.00'),
+            rental_start_date='2026-10-10',
+            rental_end_date='2026-10-15',
+            rental_days=5,
+        )
+        from rentals.models import RentalReservation
+        RentalReservation.objects.create(
+            gear=self.gear,
+            order=order,
+            rental_start_date='2026-10-10',
+            rental_end_date='2026-10-15',
+            reservation_status='Active'
+        )
+        self.gear.quantity_available = 4
+        self.gear.quantity_reserved = 1
+        self.gear.save()
+
+        # 1. Unauthenticated -> 401
+        self.client.force_authenticate(user=None)
+        res_unauth = self.client.post(f'/api/orders/{order.order_id}/inspect/', {})
+        self.assertEqual(res_unauth.status_code, status.HTTP_401_UNAUTHORIZED)
+
+        # 2. Non-staff authenticated -> 403
+        self.client.force_authenticate(user=self.normal_user)
+        res_forbidden = self.client.post(f'/api/orders/{order.order_id}/inspect/', {
+            'condition': 'minor_damage',
+            'damage_fee': '500.00',
+        }, format='json')
+        self.assertEqual(res_forbidden.status_code, status.HTTP_403_FORBIDDEN)
+
+        # 3. Staff -> 200
+        self.client.force_authenticate(user=self.staff_user)
+        res_staff = self.client.post(f'/api/orders/{order.order_id}/inspect/', {
+            'condition': 'minor_damage',
+            'damage_notes': 'Torn zipper flap',
+            'damage_fee': '600.00',
+            'cleaning_required': True,
+        }, format='json')
+        self.assertEqual(res_staff.status_code, status.HTTP_200_OK)
+        data = res_staff.json()
+        self.assertEqual(data['damage_fee'], '600.00')
+        self.assertEqual(data['refund_amount'], '2400.00')
+        self.assertTrue(data['cleaning_required'])
+
+        # Inventory restored
+        self.gear.refresh_from_db()
+        self.assertEqual(self.gear.quantity_reserved, 0)
+        self.assertEqual(self.gear.quantity_available, 5)
+
+    def test_rentals_availability_alias_endpoint(self):
+        """GET /api/rentals/availability/<gear_id>/ returns availability data."""
+        res = self.client.get(f'/api/rentals/availability/{self.gear.gear_id}/')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        data = res.json()
+        self.assertEqual(data['gear_id'], self.gear.gear_id)
+        self.assertIn('booked_ranges', data)
+        self.assertIn('next_available_date', data)
+
+    def test_analytics_permissions_and_endpoints(self):
+        """Analytics endpoints require staff; non-staff get 403, unauthenticated get 401."""
+        endpoints = [
+            '/api/admin/analytics/dashboard/',
+            '/api/admin/analytics/revenue/monthly/',
+            '/api/admin/analytics/rentals/active/',
+            '/api/admin/analytics/inventory/utilization/',
+            '/api/admin/analytics/gear/top-rented/',
+            '/api/admin/analytics/returns/pending/',
+        ]
+
+        # 401 for unauthenticated
+        self.client.force_authenticate(user=None)
+        for ep in endpoints:
+            res = self.client.get(ep)
+            self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED, f"Failed for {ep}")
+
+        # 403 for non-staff
+        self.client.force_authenticate(user=self.normal_user)
+        for ep in endpoints:
+            res = self.client.get(ep)
+            self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN, f"Failed for {ep}")
+
+        # 200 for staff
+        self.client.force_authenticate(user=self.staff_user)
+        for ep in endpoints:
+            res = self.client.get(ep)
+            self.assertEqual(res.status_code, status.HTTP_200_OK, f"Failed for {ep}")
+
+        # Check dashboard content
+        dash = self.client.get('/api/admin/analytics/dashboard/').json()
+        self.assertIn('total_orders', dash)
+        self.assertIn('total_revenue', dash)
+        self.assertIn('active_rentals', dash)
+        self.assertIn('pending_returns', dash)
+
+        # Check inventory utilization content
+        util = self.client.get('/api/admin/analytics/inventory/utilization/').json()
+        self.assertIn('inventory_utilization', util)
+
+    def test_csv_export_permissions_and_content(self):
+        """CSV export endpoints require staff and return text/csv with attachment headers."""
+        csv_endpoints = [
+            ('/api/admin/export/orders/', 'orders_export.csv'),
+            ('/api/admin/export/rentals/', 'rentals_export.csv'),
+            ('/api/admin/export/customers/', 'customers_export.csv'),
+            ('/api/admin/export/inventory/', 'inventory_export.csv'),
+        ]
+
+        # 401 unauth
+        self.client.force_authenticate(user=None)
+        for ep, _ in csv_endpoints:
+            res = self.client.get(ep)
+            self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
+
+        # 403 non-staff
+        self.client.force_authenticate(user=self.normal_user)
+        for ep, _ in csv_endpoints:
+            res = self.client.get(ep)
+            self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+
+        # 200 staff and check CSV headers and content
+        self.client.force_authenticate(user=self.staff_user)
+        for ep, filename in csv_endpoints:
+            res = self.client.get(ep)
+            self.assertEqual(res.status_code, status.HTTP_200_OK)
+            self.assertTrue(res['Content-Type'].startswith('text/csv'))
+            self.assertIn(f'filename="{filename}"', res['Content-Disposition'])
+            content = res.content.decode('utf-8')
+            self.assertGreater(len(content.splitlines()), 0)
+
+

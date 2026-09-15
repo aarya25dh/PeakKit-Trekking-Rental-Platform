@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { notificationsAPI } from "../services/api";
+import { useAuth } from "./AuthContext";
 
 const NotificationContext = createContext({
   notifications: [],
@@ -12,12 +13,27 @@ const NotificationContext = createContext({
 });
 
 export function NotificationProvider({ children }) {
+  const { user } = useAuth();
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
 
+  const getAccessToken = () =>
+    localStorage.getItem("access_token") ||
+    localStorage.getItem("token") ||
+    localStorage.getItem("jwt") ||
+    localStorage.getItem("peakkit_token");
+
   const fetchNotifications = useCallback(async () => {
+    const token = getAccessToken();
+    if (!token) {
+      setNotifications([]);
+      setUnreadCount(0);
+      return;
+    }
+
     try {
+      setLoading(true);
       const res = await notificationsAPI.getAll();
       const data = res.data;
       if (data && Array.isArray(data.notifications)) {
@@ -30,15 +46,29 @@ export function NotificationProvider({ children }) {
       }
     } catch {
       // Graceful fallback if unauthenticated or network failure
+    } finally {
+      setLoading(false);
     }
   }, []);
 
-  // Fetch on mount and poll every 30 seconds
+  // Fetch when authenticated and poll every 30 seconds; silently skip and clear when logged out
   useEffect(() => {
+    const token = getAccessToken();
+    if (!user && !token) {
+      setNotifications([]);
+      setUnreadCount(0);
+      return;
+    }
+
     fetchNotifications();
-    const interval = setInterval(fetchNotifications, 30000);
+    const interval = setInterval(() => {
+      if (getAccessToken()) {
+        fetchNotifications();
+      }
+    }, 30000);
+
     return () => clearInterval(interval);
-  }, [fetchNotifications]);
+  }, [user, fetchNotifications]);
 
   const markAsRead = async (id) => {
     try {

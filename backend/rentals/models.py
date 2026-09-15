@@ -259,11 +259,40 @@ class Gear(models.Model):
     """
     Gear inventory item model representing rent-able equipment and adventure kits.
     """
+    SIZE_CHOICES = [
+        ('XS', 'XS'),
+        ('S', 'S'),
+        ('M', 'M'),
+        ('L', 'L'),
+        ('XL', 'XL'),
+        ('One Size', 'One Size'),
+    ]
+
+    CONDITION_CHOICES = [
+        ('new', 'New'),
+        ('good', 'Good'),
+        ('fair', 'Fair'),
+        ('poor', 'Poor'),
+    ]
+
     gear_id = models.CharField(max_length=100, unique=True, db_index=True)
+    sku = models.CharField(max_length=50, unique=True, db_index=True, blank=True, null=True)
     name = models.CharField(max_length=255)
     category = models.CharField(max_length=100, blank=True)
     brand = models.CharField(max_length=100, blank=True)
+    size = models.CharField(max_length=20, choices=SIZE_CHOICES, default='One Size')
+    condition = models.CharField(max_length=20, choices=CONDITION_CHOICES, default='good')
+    purchase_price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
     daily_rental_price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+
+    quantity_total = models.IntegerField(default=1)
+    quantity_available = models.IntegerField(default=1)
+    quantity_reserved = models.IntegerField(default=0)
+    quantity_under_maintenance = models.IntegerField(default=0)
+
+    sanitized_at = models.DateTimeField(null=True, blank=True)
+    inspection_due = models.DateField(null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -273,7 +302,73 @@ class Gear(models.Model):
         ordering = ['name']
 
     def __str__(self):
-        return f"{self.gear_id} - {self.name}"
+        return f"{self.sku or self.gear_id} - {self.name}"
+
+    @property
+    def rental_price_per_day(self):
+        return self.daily_rental_price
+
+    @rental_price_per_day.setter
+    def rental_price_per_day(self, value):
+        self.daily_rental_price = value
+
+    def save(self, *args, **kwargs):
+        if not self.sku:
+            base_sku = f"GEAR-{(self.gear_id or 'ITEM').replace('-', '').upper()[:8]}"
+            candidate = base_sku
+            count = 1
+            while Gear.objects.filter(sku=candidate).exclude(pk=self.pk).exists():
+                candidate = f"{base_sku}-{count}"
+                count += 1
+            self.sku = candidate
+        super().save(*args, **kwargs)
+
+
+class GearReturn(models.Model):
+    """
+    Return and damage inspection record for rental orders.
+    """
+    CONDITION_BEFORE_CHOICES = [
+        ('new', 'New'),
+        ('good', 'Good'),
+        ('fair', 'Fair'),
+        ('poor', 'Poor'),
+    ]
+
+    CONDITION_AFTER_CHOICES = [
+        ('excellent', 'Excellent'),
+        ('good', 'Good'),
+        ('minor_damage', 'Minor Damage'),
+        ('major_damage', 'Major Damage'),
+        ('lost', 'Lost'),
+    ]
+
+    order = models.OneToOneField('Order', on_delete=models.CASCADE, related_name='gear_return')
+    gear = models.ForeignKey(Gear, on_delete=models.SET_NULL, null=True, blank=True, related_name='returns')
+    condition_before = models.CharField(max_length=20, choices=CONDITION_BEFORE_CHOICES, default='good')
+    condition_after = models.CharField(max_length=20, choices=CONDITION_AFTER_CHOICES, default='good')
+    damage_notes = models.TextField(blank=True)
+    cleaning_required = models.BooleanField(default=False)
+    deposit_held = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    damage_fee = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    refund_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    inspected_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='gear_inspections')
+    inspected_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Gear Return"
+        verbose_name_plural = "Gear Returns"
+        ordering = ['-inspected_at']
+
+    def __str__(self):
+        return f"Return for {self.order.order_id} ({self.condition_after})"
+
+    def save(self, *args, **kwargs):
+        from decimal import Decimal
+        deposit = Decimal(str(self.deposit_held or '0.00'))
+        fee = Decimal(str(self.damage_fee or '0.00'))
+        self.refund_amount = max(Decimal('0.00'), deposit - fee)
+        super().save(*args, **kwargs)
 
 
 class RentalReservation(models.Model):
