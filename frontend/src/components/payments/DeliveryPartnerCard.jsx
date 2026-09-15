@@ -3,18 +3,34 @@ import { toast } from "react-hot-toast";
 import { DELIVERY_IMAGES } from "../../data/imagePaths";
 
 function DeliveryPartnerCard({
-  riderName = "Suman Gurung",
-  phone = "+977-9800000000",
-  vehicle = "Yamaha FZ (Bagmati 02-045 Pa 3892)",
+  partner = null,
+  riderName = "Hari Sharma",
+  phone = "+977-9841234567",
+  vehicle = "Bike (BA 2 PA 1234)",
   trackingId = "PKDLV-48393",
-  eta = "Tomorrow, before 4:00 PM",
+  eta = "Within 24 Hours",
 }) {
+  const name = partner?.name || riderName;
+  const riderPhone = partner?.phone_number || partner?.whatsapp_number || phone;
+  const vehicleInfo = partner?.vehicle_number
+    ? `${partner.vehicle_type || "Vehicle"} (${partner.vehicle_number}) · ${partner.current_location || "Kathmandu Warehouse"}`
+    : vehicle;
+  const initials = name
+    .split(" ")
+    .map((n) => n[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase() || "HS";
+  const partnerRating = partner?.rating
+    ? `★ ${partner.rating} Rating`
+    : "★ 5.0 Rating";
+
   const handleCall = () => {
-    toast.success(`Connecting call to rider ${riderName} (${phone})...`);
+    toast.success(`Connecting call to rider ${name} (${riderPhone})...`);
   };
 
   const handleMessage = () => {
-    toast.success(`Opening direct message channel with ${riderName}...`);
+    toast.success(`Opening direct WhatsApp/message channel with ${name}...`);
   };
 
   return (

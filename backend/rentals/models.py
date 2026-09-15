@@ -64,6 +64,8 @@ class Order(models.Model):
         ('paypal', 'PayPal'),
         ('cod', 'Cash on Delivery'),
         ('bank_transfer', 'Bank Transfer'),
+        ('esewa', 'eSewa'),
+        ('khalti', 'Khalti'),
     ]
 
     # Unique order identifier
@@ -92,14 +94,33 @@ class Order(models.Model):
     payment_status = models.CharField(max_length=20, choices=PAYMENT_STATUS_CHOICES, default='pending')
     transaction_id = models.CharField(max_length=255, blank=True, null=True, unique=True)
 
+    RESERVATION_STATUS_CHOICES = [
+        ('Upcoming', 'Upcoming'),
+        ('Active', 'Active'),
+        ('Returning', 'Returning'),
+        ('Returned', 'Returned'),
+        ('Cancelled', 'Cancelled'),
+    ]
+
     # Order amounts
+    daily_rental_price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    rental_days = models.IntegerField(default=7)
     subtotal = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
     delivery_charge = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
     security_deposit = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
     total_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
 
-    # Order status
+    # Order status and reservation status
     order_status = models.CharField(max_length=20, choices=ORDER_STATUS_CHOICES, default='pending')
+    reservation_status = models.CharField(
+        max_length=20,
+        choices=RESERVATION_STATUS_CHOICES,
+        default='Upcoming'
+    )
+
+    # Rental period dates
+    rental_start_date = models.DateField(null=True, blank=True)
+    rental_end_date = models.DateField(null=True, blank=True)
 
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
@@ -119,6 +140,9 @@ class Order(models.Model):
             models.Index(fields=['customer']),
             models.Index(fields=['order_status']),
             models.Index(fields=['payment_status']),
+            models.Index(fields=['reservation_status']),
+            models.Index(fields=['rental_start_date']),
+            models.Index(fields=['rental_end_date']),
         ]
 
     def __str__(self):
@@ -144,7 +168,7 @@ class Order(models.Model):
         return f'{prefix}{next_num:06d}'
 
     def save(self, *args, **kwargs):
-        """Generate order_id if not present."""
+        """Generate order_id and calculate pricing / dates dynamically."""
         if not self.order_id:
             # Format: PK-2026-000001
             year = timezone.now().year
@@ -160,10 +184,41 @@ class Order(models.Model):
                 next_num = 1
             
             self.order_id = f'PK-{year}-{next_num:06d}'
+
+        # Ensure rental_start_date and rental_end_date are date objects if strings were passed
+        from datetime import datetime
+        if isinstance(self.rental_start_date, str):
+            self.rental_start_date = datetime.strptime(self.rental_start_date[:10], '%Y-%m-%d').date()
+        if isinstance(self.rental_end_date, str):
+            self.rental_end_date = datetime.strptime(self.rental_end_date[:10], '%Y-%m-%d').date()
+
+        # Dynamic rental days calculation
+        if self.rental_start_date and self.rental_end_date:
+            delta_days = (self.rental_end_date - self.rental_start_date).days
+            if delta_days > 0:
+                self.rental_days = delta_days
+
+            # Auto-sync return_date with rental_end_date
+            if not self.return_date or (hasattr(self.return_date, 'date') and self.return_date.date() != self.rental_end_date):
+                self.return_date = timezone.datetime.combine(
+                    self.rental_end_date,
+                    timezone.datetime.min.time(),
+                    tzinfo=timezone.get_current_timezone()
+                )
+
+        from decimal import Decimal
+        # Recalculate subtotal from daily price or vice versa
+        if self.daily_rental_price and Decimal(str(self.daily_rental_price)) > 0 and self.rental_days:
+            self.subtotal = Decimal(str(self.daily_rental_price)) * Decimal(str(self.rental_days))
+        elif self.subtotal and self.rental_days:
+            self.daily_rental_price = round(Decimal(str(self.subtotal)) / Decimal(str(self.rental_days)), 2)
         
-        # Auto-calculate total_amount
-        if self.subtotal and self.delivery_charge is not None:
-            self.total_amount = self.subtotal + self.delivery_charge + (self.security_deposit or 0)
+        # Auto-calculate total_amount safely with Decimal
+        if self.subtotal is not None and self.delivery_charge is not None:
+            sub = Decimal(str(self.subtotal))
+            deliv = Decimal(str(self.delivery_charge))
+            sec = Decimal(str(self.security_deposit or '0.00'))
+            self.total_amount = sub + deliv + sec
         
         super().save(*args, **kwargs)
 
@@ -198,3 +253,90 @@ class TrackingEvent(models.Model):
 
     def __str__(self):
         return f"{self.order.order_id} - {self.title}"
+
+
+class Gear(models.Model):
+    """
+    Gear inventory item model representing rent-able equipment and adventure kits.
+    """
+    gear_id = models.CharField(max_length=100, unique=True, db_index=True)
+    name = models.CharField(max_length=255)
+    category = models.CharField(max_length=100, blank=True)
+    brand = models.CharField(max_length=100, blank=True)
+    daily_rental_price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Gear"
+        verbose_name_plural = "Gear"
+        ordering = ['name']
+
+    def __str__(self):
+        return f"{self.gear_id} - {self.name}"
+
+
+class RentalReservation(models.Model):
+    """
+    Calendar reservation tracking gear bookings and availability.
+    """
+    RESERVATION_STATUS_CHOICES = [
+        ('Reserved', 'Reserved'),
+        ('Active', 'Active'),
+        ('Returned', 'Returned'),
+        ('Cancelled', 'Cancelled'),
+    ]
+
+    gear = models.ForeignKey(Gear, on_delete=models.CASCADE, related_name='reservations')
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='reservations', null=True, blank=True)
+    rental_start_date = models.DateField(db_index=True)
+    rental_end_date = models.DateField(db_index=True)
+    reservation_status = models.CharField(
+        max_length=20,
+        choices=RESERVATION_STATUS_CHOICES,
+        default='Reserved',
+        db_index=True
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Rental Reservation"
+        verbose_name_plural = "Rental Reservations"
+        ordering = ['rental_start_date', 'rental_end_date']
+        indexes = [
+            models.Index(fields=['gear', 'reservation_status']),
+            models.Index(fields=['rental_start_date', 'rental_end_date']),
+        ]
+
+    def __str__(self):
+        return f"{self.gear.gear_id} ({self.rental_start_date} -> {self.rental_end_date}) [{self.reservation_status}]"
+
+
+class CartItem(models.Model):
+    """
+    Cart item storage for dynamic duration and price recalculation.
+    """
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='cart_items', null=True, blank=True)
+    item_id = models.CharField(max_length=100, db_index=True)
+    name = models.CharField(max_length=255)
+    gear = models.ForeignKey(Gear, on_delete=models.SET_NULL, null=True, blank=True)
+    rental_start_date = models.DateField(null=True, blank=True)
+    rental_end_date = models.DateField(null=True, blank=True)
+    rental_days = models.IntegerField(default=7)
+    daily_rental_price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    quantity = models.IntegerField(default=1)
+    subtotal = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    delivery_charge = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    security_deposit = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    total_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Cart Item"
+        verbose_name_plural = "Cart Items"
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return f"{self.item_id} - {self.name} ({self.rental_days} days)"

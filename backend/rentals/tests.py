@@ -119,6 +119,109 @@ class OrderStatusEngineTests(TestCase):
         self.partner.refresh_from_db()
         self.assertTrue(self.partner.available)
 
+    @patch('rentals.status_engine.whatsapp_service.send_text_message', return_value={'ok': True})
+    @patch('rentals.status_engine.whatsapp_service.send_order_confirmation', return_value={'ok': True})
+    @patch('rentals.status_engine.whatsapp_service.send_payment_confirmation', return_value={'ok': True})
+    @patch('rentals.status_engine.whatsapp_service.send_rider_assigned', return_value={'ok': True})
+    @patch('rentals.status_engine.whatsapp_service.send_delivery_confirmation', return_value={'ok': True})
+    @patch('rentals.status_engine.whatsapp_service.send_rider_notification', return_value={'ok': True})
+    @patch('rentals.status_engine.whatsapp_service.send_return_reminder', return_value={'ok': True})
+    def test_no_future_events_created_at_intermediate_status(self, *mocks):
+        """
+        Hotfix: PATCH status to 'shipped' must NOT create Out For Delivery,
+        Delivered, or Return Reminder events.  Only events up to 'shipped' are allowed.
+        """
+        # Advance order to 'shipped' step by step
+        OrderStatusEngine.on_order_created(self.order, send_external=False)
+        OrderStatusEngine.update_order_status(self.order, 'confirmed', send_external=False)
+        OrderStatusEngine.update_order_status(self.order, 'packed', send_external=False)
+        OrderStatusEngine.update_order_status(self.order, 'shipped', send_external=False)
+
+        events = list(TrackingEvent.objects.filter(order=self.order).values_list('title', flat=True))
+
+        # Events that MUST exist at 'shipped'
+        expected = [
+            'Reservation Confirmed',
+            'Payment Verified',
+            'Gear Sanitized',
+            'Packed At PeakKit Warehouse',
+            'Rider Assigned',
+        ]
+        for title in expected:
+            self.assertIn(title, events, f"Expected '{title}' to exist at 'shipped'")
+
+        # Events that must NOT exist yet at 'shipped'
+        forbidden = ['Out For Delivery', 'Delivered', 'Return Reminder']
+        for title in forbidden:
+            self.assertNotIn(title, events, f"'{title}' must not exist at 'shipped' (future event)")
+
+    @patch('rentals.status_engine.whatsapp_service.send_text_message', return_value={'ok': True})
+    @patch('rentals.status_engine.whatsapp_service.send_order_confirmation', return_value={'ok': True})
+    @patch('rentals.status_engine.whatsapp_service.send_payment_confirmation', return_value={'ok': True})
+    @patch('rentals.status_engine.whatsapp_service.send_rider_assigned', return_value={'ok': True})
+    @patch('rentals.status_engine.whatsapp_service.send_delivery_confirmation', return_value={'ok': True})
+    @patch('rentals.status_engine.whatsapp_service.send_rider_notification', return_value={'ok': True})
+    @patch('rentals.status_engine.whatsapp_service.send_return_reminder', return_value={'ok': True})
+    def test_timeline_sequential_progression(self, *mocks):
+        """
+        Full sequential check: at each status transition, exactly the right set of
+        tracking events exists — no more, no less.
+        """
+        def events():
+            return set(TrackingEvent.objects.filter(order=self.order).values_list('title', flat=True))
+
+        # --- pending (on_order_created) ---
+        OrderStatusEngine.on_order_created(self.order, send_external=False)
+        self.assertIn('Reservation Confirmed', events())
+        self.assertNotIn('Payment Verified', events())
+        self.assertNotIn('Gear Sanitized', events())
+        self.assertNotIn('Rider Assigned', events())
+        self.assertNotIn('Out For Delivery', events())
+        self.assertNotIn('Delivered', events())
+        self.assertNotIn('Return Reminder', events())
+
+        # --- confirmed ---
+        OrderStatusEngine.update_order_status(self.order, 'confirmed', send_external=False)
+        # payment_status='paid' so Payment Verified should now appear
+        self.assertIn('Payment Verified', events())
+        self.assertNotIn('Gear Sanitized', events())
+        self.assertNotIn('Rider Assigned', events())
+        self.assertNotIn('Out For Delivery', events())
+        self.assertNotIn('Delivered', events())
+        self.assertNotIn('Return Reminder', events())
+
+        # --- packed ---
+        OrderStatusEngine.update_order_status(self.order, 'packed', send_external=False)
+        self.assertIn('Gear Sanitized', events())
+        self.assertIn('Packed At PeakKit Warehouse', events())
+        self.assertNotIn('Rider Assigned', events())
+        self.assertNotIn('Out For Delivery', events())
+        self.assertNotIn('Delivered', events())
+        self.assertNotIn('Return Reminder', events())
+
+        # --- shipped ---
+        OrderStatusEngine.update_order_status(self.order, 'shipped', send_external=False)
+        self.assertIn('Rider Assigned', events())
+        self.assertNotIn('Out For Delivery', events())
+        self.assertNotIn('Delivered', events())
+        self.assertNotIn('Return Reminder', events())
+
+        # --- out_for_delivery ---
+        OrderStatusEngine.update_order_status(self.order, 'out_for_delivery', send_external=False)
+        self.assertIn('Out For Delivery', events())
+        self.assertNotIn('Delivered', events())
+        self.assertNotIn('Return Reminder', events())
+
+        # --- delivered ---
+        OrderStatusEngine.update_order_status(self.order, 'delivered', send_external=False)
+        self.assertIn('Delivered', events())
+        # return_date is set on self.order so Return Reminder should appear
+        self.assertIn('Return Reminder', events())
+
+        # Idempotency: calling sync again must not create duplicates
+        pre_count = TrackingEvent.objects.filter(order=self.order).count()
+        OrderStatusEngine.sync_tracking_events(self.order)
+        self.assertEqual(TrackingEvent.objects.filter(order=self.order).count(), pre_count)
 
 @override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend')
 class OrderAndNotificationAPITests(TestCase):
@@ -195,3 +298,298 @@ class OrderAndNotificationAPITests(TestCase):
 
         after = self.client.get('/api/notifications/')
         self.assertEqual(after.json()['unread_count'], 0)
+
+    @patch('rentals.status_engine.whatsapp_service.send_text_message', return_value=None)
+    @patch('rentals.status_engine.whatsapp_service.send_order_confirmation', return_value=None)
+    @patch('rentals.status_engine.whatsapp_service.send_payment_confirmation', return_value=None)
+    def test_create_order_minimal_payload_with_esewa_and_khalti(self, *mocks):
+        # Minimal payload as specified in Bug 1 with esewa
+        esewa_res = self.client.post('/api/orders/create/', {
+            'destination': 'Mardi Himal',
+            'address': 'Kathmandu',
+            'landmark': 'Boudha Stupa',
+            'phone_number': '9800000000',
+            'payment_method': 'esewa',
+        }, format='json')
+        self.assertEqual(esewa_res.status_code, status.HTTP_201_CREATED)
+        esewa_data = esewa_res.json()['order']
+        self.assertEqual(esewa_data['payment_method'], 'esewa')
+        self.assertEqual(esewa_data['customer_email'], self.user.email)
+        self.assertEqual(esewa_data['customer_phone'], '9800000000')
+        self.assertEqual(esewa_data['order_status'], 'confirmed')
+        self.assertTrue(esewa_data['transaction_id'])
+        self.assertTrue(any(ev['title'] == 'Reservation Confirmed' for ev in esewa_data['tracking_events']))
+
+        # Test Khalti normalization
+        khalti_res = self.client.post('/api/orders/create/', {
+            'destination': 'Langtang Valley',
+            'address': 'Pokhara',
+            'landmark': 'Lakeside',
+            'phone_number': '9811111111',
+            'payment_method': 'KHALTI',
+        }, format='json')
+        self.assertEqual(khalti_res.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(khalti_res.json()['order']['payment_method'], 'khalti')
+
+        # Test Cash on Delivery alias normalization
+        cod_res = self.client.post('/api/orders/create/', {
+            'destination': 'Annapurna Base Camp',
+            'address': 'Thamel',
+            'landmark': 'Chhetrapati',
+            'phone_number': '9822222222',
+            'payment_method': 'cash_on_delivery',
+        }, format='json')
+        self.assertEqual(cod_res.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(cod_res.json()['order']['payment_method'], 'cod')
+
+        # Verify string order_id detail endpoint
+        order_id = esewa_data['order_id']
+        detail_res = self.client.get(f'/api/orders/{order_id}/')
+        self.assertEqual(detail_res.status_code, status.HTTP_200_OK)
+        self.assertEqual(detail_res.json()['order']['order_id'], order_id)
+
+        # Verify notification created
+        notif_res = self.client.get('/api/notifications/')
+        self.assertEqual(notif_res.status_code, status.HTTP_200_OK)
+        self.assertTrue(any(n['related_order_id'] == order_id for n in notif_res.json()['notifications']))
+
+    @patch('rentals.services.whatsapp_service.send_text_message')
+    def test_order_status_update_flow_and_whatsapp_service(self, mock_send_text):
+        mock_send_text.return_value = {'success': True, 'data': {'messages': [{'id': 'wamid.123'}]}}
+
+        order = Order.objects.create(
+            customer=self.user,
+            customer_email=self.user.email,
+            customer_phone='9860467948',
+            destination='Mardi Himal',
+            address='Kathmandu',
+            payment_method='card',
+            payment_status='pending',
+            order_status='pending',
+            subtotal=Decimal('5000.00'),
+            delivery_charge=Decimal('500.00'),
+            security_deposit=Decimal('1000.00'),
+        )
+
+        # 1. Update to shipped
+        shipped_res = self.client.patch(f'/api/orders/{order.order_id}/status/', {
+            'order_status': 'shipped'
+        }, format='json')
+        self.assertEqual(shipped_res.status_code, status.HTTP_200_OK)
+        self.assertEqual(shipped_res.json()['order']['order_status'], 'shipped')
+        order.refresh_from_db()
+        self.assertEqual(order.order_status, 'shipped')
+
+        # 2. Update to out_for_delivery
+        out_res = self.client.patch(f'/api/orders/{order.order_id}/status/', {
+            'order_status': 'out_for_delivery'
+        }, format='json')
+        self.assertEqual(out_res.status_code, status.HTTP_200_OK)
+        self.assertEqual(out_res.json()['order']['order_status'], 'out_for_delivery')
+        order.refresh_from_db()
+        self.assertEqual(order.order_status, 'out_for_delivery')
+
+        # 3. Update to delivered
+        deliv_res = self.client.patch(f'/api/orders/{order.order_id}/status/', {
+            'order_status': 'delivered'
+        }, format='json')
+        self.assertEqual(deliv_res.status_code, status.HTTP_200_OK)
+        self.assertEqual(deliv_res.json()['order']['order_status'], 'delivered')
+        order.refresh_from_db()
+        self.assertEqual(order.order_status, 'delivered')
+
+        # 4. Invalid status returns 400
+        invalid_res = self.client.patch(f'/api/orders/{order.order_id}/status/', {
+            'order_status': 'invalid_status_xyz'
+        }, format='json')
+        self.assertEqual(invalid_res.status_code, status.HTTP_400_BAD_REQUEST)
+        order.refresh_from_db()
+        self.assertEqual(order.order_status, 'delivered')
+
+        # 5. Nonexistent order returns 404
+        nonexistent_res = self.client.patch('/api/orders/PK-9999-999999/status/', {
+            'order_status': 'shipped'
+        }, format='json')
+        self.assertEqual(nonexistent_res.status_code, status.HTTP_404_NOT_FOUND)
+
+        # 6. Nonexistent notification returns 404
+        nonexistent_notif_res = self.client.patch('/api/notifications/999999/read/')
+        self.assertEqual(nonexistent_notif_res.status_code, status.HTTP_404_NOT_FOUND)
+
+
+@override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend')
+class RentalDurationAndAvailabilityEngineTests(TestCase):
+    """
+    Comprehensive tests for PeakKit Sprint 3.4A:
+    - Rental day calculation & validation
+    - Price engine (subtotal = daily * days)
+    - Overlap rejection and next available date
+    - Gear availability endpoint
+    - Cart recalculation endpoint
+    - Return engine workflow
+    """
+    def setUp(self):
+        from rentals.models import Gear, RentalReservation
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            username='rentaluser',
+            email='rental@peakkit.com',
+            password='Test@1234',
+            first_name='Rental',
+            last_name='Tester',
+        )
+        self.client.force_authenticate(user=self.user)
+
+        self.gear = Gear.objects.create(
+            gear_id='gear-test-pack-01',
+            name='Alpine Expedition 65L Pack',
+            category='Backpacks',
+            daily_rental_price=Decimal('600.00'),
+        )
+
+        # Existing reservation: 2026-10-10 to 2026-10-17
+        self.reservation = RentalReservation.objects.create(
+            gear=self.gear,
+            rental_start_date='2026-10-10',
+            rental_end_date='2026-10-17',
+            reservation_status='Active'
+        )
+
+    def test_rental_days_and_price_calculation(self):
+        """Test valid dates dynamically calculate rental_days and subtotal."""
+        res = self.client.post('/api/orders/create/', {
+            'destination': 'Annapurna Base Camp',
+            'address': 'Pokhara',
+            'phone_number': '9841234567',
+            'rental_start_date': '2026-11-01',
+            'rental_end_date': '2026-11-11',
+            'daily_rental_price': '800.00',
+            'delivery_charge': '500.00',
+            'security_deposit': '1000.00',
+            'payment_method': 'card',
+        }, format='json')
+
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        order_data = res.json()['order']
+        self.assertEqual(order_data['rental_days'], 10)
+        self.assertEqual(Decimal(str(order_data['subtotal'])), Decimal('8000.00'))
+        self.assertEqual(Decimal(str(order_data['total_amount'])), Decimal('9500.00'))
+        self.assertEqual(order_data['reservation_status'], 'Active')
+
+    def test_invalid_dates_rejected(self):
+        """End date before start date, <1 day, and >30 days must be rejected."""
+        # 1. End date before start date
+        res1 = self.client.post('/api/orders/create/', {
+            'destination': 'Langtang',
+            'address': 'Kathmandu',
+            'rental_start_date': '2026-11-10',
+            'rental_end_date': '2026-11-05',
+        }, format='json')
+        self.assertEqual(res1.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # 2. Same day (<1 day)
+        res2 = self.client.post('/api/orders/create/', {
+            'destination': 'Langtang',
+            'address': 'Kathmandu',
+            'rental_start_date': '2026-11-10',
+            'rental_end_date': '2026-11-10',
+        }, format='json')
+        self.assertEqual(res2.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # 3. Exceeding 30 days
+        res3 = self.client.post('/api/orders/create/', {
+            'destination': 'Langtang',
+            'address': 'Kathmandu',
+            'rental_start_date': '2026-11-01',
+            'rental_end_date': '2026-12-05',
+        }, format='json')
+        self.assertEqual(res3.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_overlapping_reservation_rejected_with_next_available_date(self):
+        """Overlapping reservations must return 400 with next_available_date."""
+        res = self.client.post('/api/orders/create/', {
+            'destination': 'Everest Region',
+            'address': 'Kathmandu',
+            'gear_id': self.gear.gear_id,
+            'rental_start_date': '2026-10-12',
+            'rental_end_date': '2026-10-20',
+            'payment_method': 'card',
+        }, format='json')
+
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        error_data = res.json()
+        error_msg = str(error_data)
+        self.assertIn("Gear unavailable for selected dates.", error_msg)
+        self.assertIn("2026-10-18", error_msg)
+
+    def test_gear_availability_endpoint(self):
+        """GET /api/gear/<gear_id>/availability/ returns booked ranges and next available date."""
+        res = self.client.get(f'/api/gear/{self.gear.gear_id}/availability/')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        data = res.json()
+        self.assertEqual(data['gear_id'], self.gear.gear_id)
+        self.assertTrue(len(data['booked_ranges']) >= 1)
+        self.assertEqual(data['booked_ranges'][0]['start'], '2026-10-10')
+        self.assertEqual(data['booked_ranges'][0]['end'], '2026-10-17')
+        self.assertTrue(data['next_available_date'])
+
+    def test_cart_item_recalculation_endpoint(self):
+        """PATCH /api/cart/<item_id>/ returns updated duration, subtotal, and total amount."""
+        res = self.client.patch('/api/cart/item-test-123/', {
+            'rental_start_date': '2026-10-01',
+            'rental_end_date': '2026-10-06',
+            'daily_rental_price': '700.00',
+            'quantity': 2,
+        }, format='json')
+
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        data = res.json()
+        self.assertEqual(data['rental_days'], 5)
+        # 700 * 5 * 2 = 7000
+        self.assertEqual(Decimal(data['subtotal']), Decimal('7000.00'))
+        # 60% deposit = 4200, total = 7000 + 4200 = 11200
+        self.assertEqual(Decimal(data['security_deposit']), Decimal('4200.00'))
+        self.assertEqual(Decimal(data['total_amount']), Decimal('11200.00'))
+
+    def test_order_return_workflow(self):
+        """PATCH /api/orders/<order_id>/return/ sets status to Returned, creates events & notification."""
+        order = Order.objects.create(
+            customer=self.user,
+            customer_email=self.user.email,
+            customer_phone='9841234567',
+            destination='Mardi Himal',
+            address='Kathmandu',
+            payment_method='card',
+            payment_status='paid',
+            order_status='delivered',
+            reservation_status='Active',
+            rental_start_date='2026-09-01',
+            rental_end_date='2026-09-08',
+            rental_days=7,
+            subtotal=Decimal('5600.00'),
+        )
+
+        res = self.client.patch(f'/api/orders/{order.order_id}/return/', {
+            'condition': 'good'
+        }, format='json')
+
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        order.refresh_from_db()
+        self.assertEqual(order.reservation_status, 'Returned')
+        self.assertTrue(order.return_completed)
+        self.assertIsNotNone(order.return_completed_at)
+
+        # Check tracking event
+        self.assertTrue(
+            order.tracking_events.filter(title='Return Completed').exists()
+        )
+        # Check notification
+        self.assertTrue(
+            Notification.objects.filter(
+                user=self.user,
+                title='Deposit Refund Processing',
+                related_order_id=order.order_id
+            ).exists()
+        )
+
+

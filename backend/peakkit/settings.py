@@ -62,6 +62,7 @@ MIDDLEWARE = [
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
+    "https://localhost:5173",
 ]
 
 ROOT_URLCONF = "peakkit.urls"
@@ -196,8 +197,21 @@ SIMPLE_JWT = {
 # Frontend URL for email links
 FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:5173')
 
+# CSRF Trusted Origins — allow both HTTP and HTTPS localhost for local dev.
+# In production, replace with your real domain (e.g. https://peakkit.com).
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:5173",
+    "https://localhost:5173",
+    "http://127.0.0.1:8000",
+    "https://127.0.0.1:8000",
+]
+
+# Allow credentials (cookies) on cross-origin requests (needed for JWT refresh cookie).
+CORS_ALLOW_CREDENTIALS = True
+
 # Security Settings
-# These are only applied when DEBUG=False (production)
+# SECURE_SSL_REDIRECT is ONLY enabled in production (DEBUG=False).
+# The local dev server uses Django's built-in runserver with a TLS wrapper — no redirect needed.
 if not DEBUG:
     SECURE_SSL_REDIRECT = True
     SESSION_COOKIE_SECURE = True
@@ -207,5 +221,13 @@ if not DEBUG:
     SECURE_HSTS_PRELOAD = True
     ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='').split(',')
 else:
-    # Development settings
+    # Development — no forced redirects; HTTPS is opt-in via runserver_plus.
+    SECURE_SSL_REDIRECT = False
+    SESSION_COOKIE_SECURE = False
+    CSRF_COOKIE_SECURE = False
     ALLOWED_HOSTS = ['*']
+
+# WhatsApp Cloud API Settings
+WHATSAPP_ACCESS_TOKEN = config('WHATSAPP_ACCESS_TOKEN', default='')
+WHATSAPP_PHONE_NUMBER_ID = config('WHATSAPP_PHONE_NUMBER_ID', default='')
+WHATSAPP_API_VERSION = config('WHATSAPP_API_VERSION', default='v23.0')
