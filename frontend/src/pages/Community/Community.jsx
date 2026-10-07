@@ -1,5 +1,6 @@
 import { Camera, Heart, MapPin, Users } from "lucide-react";
 import PageHero from "../../components/common/PageHero";
+import SEO from "../../components/common/SEO";
 import { COMMUNITY_IMAGES } from "../../data/imagePaths";
 
 const stories = [
@@ -11,13 +12,18 @@ const stories = [
 function Community() {
   return (
     <main>
+      <SEO
+        title="Trekker Community & Trail Stories"
+        description="Connect with 2,400+ trekkers in Nepal. Read real route reports, packing reviews, and mountain photo galleries from Everest, Annapurna, and Mustang."
+        canonical="/community"
+      />
       <PageHero
         image={COMMUNITY_IMAGES.communityHero}
-        breadcrumb="PEAKKIT / COMMUNITY"
+        breadcrumb="TRAIL STORIES / COMMUNITY"
         title="Stories From the Trail"
         subtitle="Adventures shared by trekkers across Everest, Annapurna, Langtang, Mustang, Rolwaling and beyond."
         primaryButton={{
-          text: "Join PeakKit",
+          text: "Join the Community",
           to: "/register",
         }}
       />

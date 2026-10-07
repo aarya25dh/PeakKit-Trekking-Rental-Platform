@@ -60,10 +60,12 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "https://localhost:5173",
-]
+cors_env = config("CORS_ALLOWED_ORIGINS", default="http://localhost:5173,https://localhost:5173")
+CORS_ALLOWED_ORIGINS = [origin.strip() for origin in cors_env.split(",") if origin.strip()]
+CORS_ALLOW_ALL_ORIGINS = config("CORS_ALLOW_ALL_ORIGINS", default=False, cast=bool)
+
+csrf_env = config("CSRF_TRUSTED_ORIGINS", default="http://localhost:5173,https://localhost:5173")
+CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in csrf_env.split(",") if origin.strip()]
 
 ROOT_URLCONF = "peakkit.urls"
 
@@ -86,6 +88,10 @@ WSGI_APPLICATION = "peakkit.wsgi.application"
 
 
 import sys
+import dj_database_url
+
+DATABASE_URL = config("DATABASE_URL", default=None)
+DB_ENGINE = config("DB_ENGINE", default=None)
 
 if 'test' in sys.argv:
     DATABASES = {
@@ -94,15 +100,30 @@ if 'test' in sys.argv:
             'NAME': ':memory:',
         }
     }
+elif DATABASE_URL:
+    DATABASES = {
+        'default': dj_database_url.config(
+            default=DATABASE_URL,
+            conn_max_age=600,
+            conn_health_checks=True,
+        )
+    }
+elif DB_ENGINE == "sqlite" or config("USE_SQLITE", default=False, cast=bool):
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
+    }
 else:
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.postgresql",
-            "NAME": config("DB_NAME"),
-            "USER": config("DB_USER"),
-            "PASSWORD": config("DB_PASSWORD"),
-            "HOST": config("DB_HOST"),
-            "PORT": config("DB_PORT"),
+            "NAME": config("DB_NAME", default="peakkit_db"),
+            "USER": config("DB_USER", default="peakkit_user"),
+            "PASSWORD": config("DB_PASSWORD", default="peakkit123"),
+            "HOST": config("DB_HOST", default="localhost"),
+            "PORT": config("DB_PORT", default="5432"),
         }
     }
 # Password validation

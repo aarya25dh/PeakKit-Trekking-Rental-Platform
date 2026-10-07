@@ -14,6 +14,7 @@ import {
 import PageHero from "../../components/common/PageHero";
 import OrderTimeline from "../../components/payments/OrderTimeline";
 import DeliveryPartnerCard from "../../components/payments/DeliveryPartnerCard";
+import SEO from "../../components/common/SEO";
 import { HERO_IMAGES } from "../../data/imagePaths";
 import { ordersAPI } from "../../services/api";
 
@@ -45,6 +46,12 @@ function TrackingPage() {
 
   return (
     <main className="bg-[#f9fafb] pb-24">
+      <SEO
+        title={`Tracking Order ${orderId || ""}`}
+        description="Live expedition gear delivery tracking."
+        canonical={`/tracking/${orderId || ""}`}
+        noIndex={true}
+      />
       <PageHero
         image={HERO_IMAGES.checkoutBanner}
         breadcrumb="PEAKKIT / LIVE TRACKING"

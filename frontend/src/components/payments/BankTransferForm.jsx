@@ -55,7 +55,7 @@ function BankTransferForm({ amount, onSuccess }) {
         branch,
         reference,
       });
-    }, 1200);
+    }, 300);
   };
 
   return (

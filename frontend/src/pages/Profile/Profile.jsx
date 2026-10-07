@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { toast } from "react-hot-toast";
 import PageHero from "../../components/common/PageHero";
+import SEO from "../../components/common/SEO";
 import { HERO_IMAGES } from "../../data/imagePaths";
 import { profileAPI } from "../../services/api";
 
@@ -82,6 +83,12 @@ function Profile() {
 
   return (
     <main className="bg-[#f9fafb] pb-24">
+      <SEO
+        title="Member Profile & Settings"
+        description="Manage your PeakKit member profile, delivery addresses, and personal contact details."
+        canonical="/profile"
+        noIndex={true}
+      />
       <PageHero
         image={HERO_IMAGES.langtang}
         breadcrumb="PEAKKIT / MEMBER PROFILE"
@@ -91,7 +98,48 @@ function Profile() {
 
       <div className="mx-auto max-w-4xl px-5 py-12 lg:px-8">
         {loading ? (
-          <div className="h-96 animate-pulse rounded-3xl border border-slate-200 bg-white" />
+          <div className="animate-pulse rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-10 space-y-8">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-6">
+              <div className="flex items-center gap-4">
+                <div className="h-16 w-16 rounded-2xl bg-stone-200" />
+                <div className="space-y-2">
+                  <div className="h-6 w-40 rounded-lg bg-stone-200" />
+                  <div className="h-4 w-52 rounded-md bg-stone-200/70" />
+                </div>
+              </div>
+              <div className="h-10 w-36 rounded-full bg-stone-200" />
+            </div>
+            <div className="grid gap-6 sm:grid-cols-2">
+              <div className="space-y-2">
+                <div className="h-3 w-20 rounded bg-stone-200/80" />
+                <div className="h-12 rounded-2xl bg-stone-200/70" />
+              </div>
+              <div className="space-y-2">
+                <div className="h-3 w-20 rounded bg-stone-200/80" />
+                <div className="h-12 rounded-2xl bg-stone-200/70" />
+              </div>
+              <div className="space-y-2">
+                <div className="h-3 w-32 rounded bg-stone-200/80" />
+                <div className="h-12 rounded-2xl bg-stone-200/50" />
+              </div>
+              <div className="space-y-2">
+                <div className="h-3 w-36 rounded bg-stone-200/80" />
+                <div className="h-12 rounded-2xl bg-stone-200/50" />
+              </div>
+              <div className="sm:col-span-2 space-y-2">
+                <div className="h-3 w-32 rounded bg-stone-200/80" />
+                <div className="h-12 rounded-2xl bg-stone-200/70" />
+              </div>
+              <div className="space-y-2">
+                <div className="h-3 w-16 rounded bg-stone-200/80" />
+                <div className="h-12 rounded-2xl bg-stone-200/70" />
+              </div>
+              <div className="space-y-2">
+                <div className="h-3 w-20 rounded bg-stone-200/80" />
+                <div className="h-12 rounded-2xl bg-stone-200/70" />
+              </div>
+            </div>
+          </div>
         ) : (
           <form
             onSubmit={handleSubmit}

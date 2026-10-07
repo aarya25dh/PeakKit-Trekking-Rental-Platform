@@ -10,13 +10,19 @@ import csv
 from django.http import HttpResponse
 from decimal import Decimal
 from django.db import transaction
-from django.db.models import Sum, Count
+from django.db.models import Sum, Count, Q
 from django.db.models.functions import TruncMonth
+from django.contrib.auth.models import User
 
-from .models import Order, TrackingEvent, DeliveryPartner, Gear, RentalReservation, CartItem, GearReturn
+from .models import (
+    Order, TrackingEvent, DeliveryPartner, Gear, RentalReservation,
+    CartItem, GearReturn, AdventureKit, AdventureKitItem, OrderItem
+)
 from .serializers import (
     OrderListSerializer, OrderDetailSerializer,
-    OrderCreateSerializer, OrderStatusUpdateSerializer, CartItemSerializer
+    OrderCreateSerializer, OrderStatusUpdateSerializer, CartItemSerializer,
+    GearSerializer, RentalReservationSerializer, DeliveryPartnerSerializer,
+    AdventureKitSerializer, AdventureKitItemSerializer, OrderItemSerializer
 )
 from .services import send_order_confirmation_whatsapp
 from users.permissions import IsAuthenticatedUser
@@ -30,7 +36,10 @@ class OrderListView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        orders = Order.objects.filter(customer=request.user)
+        if request.user.is_staff:
+            orders = Order.objects.all().order_by('-created_at')
+        else:
+            orders = Order.objects.filter(customer=request.user).order_by('-created_at')
         serializer = OrderListSerializer(orders, many=True)
         return Response({
             'message': 'Orders retrieved successfully.',
@@ -76,18 +85,8 @@ class OrderCreateView(APIView):
         
         if serializer.is_valid():
             order = serializer.save()
-
-            # Immediately send WhatsApp confirmation to customer.
-            # Failure must NEVER break order creation.
-            try:
-                send_order_confirmation_whatsapp(order, request=request)
-            except Exception as exc:
-                logger.error(
-                    "WhatsApp confirmation failed for order %s: %s",
-                    order.order_id, exc
-                )
             
-            # Return the created order
+            # Return the created order immediately
             response_serializer = OrderDetailSerializer(order)
             
             return Response({
@@ -554,11 +553,28 @@ class AnalyticsDashboardView(APIView):
             return_date__lt=now
         ).exclude(order_status='cancelled').count()
 
+        total_customers = User.objects.filter(is_staff=False, is_superuser=False).exclude(
+            username__in=['suman.tamang', 'prabin.lama', 'kiran.thapa', 'bikash.magar', 'anisha.gurung']
+        ).count()
+        total_gear = Gear.objects.count()
+        completed_orders = Order.objects.filter(
+            Q(order_status__in=['delivered', 'completed']) | Q(return_completed=True)
+        ).count()
+        processing_orders = Order.objects.filter(
+            order_status__in=['pending', 'confirmed', 'packed', 'processing', 'shipped', 'out_for_delivery']
+        ).count()
+        cancelled_orders = Order.objects.filter(order_status='cancelled').count()
+
         return Response({
             'total_orders': total_orders,
             'total_revenue': str(paid_revenue),
             'active_rentals': active_rentals,
             'pending_returns': pending_returns,
+            'total_customers': total_customers,
+            'total_gear': total_gear,
+            'completed_orders': completed_orders,
+            'processing_orders': processing_orders,
+            'cancelled_orders': cancelled_orders,
         }, status=status.HTTP_200_OK)
 
 
@@ -830,3 +846,479 @@ class ExportInventoryCsvView(APIView):
                 g.inspection_due.strftime('%Y-%m-%d') if g.inspection_due else ''
             ])
         return response
+
+
+class AdminGearListView(APIView):
+    """
+    GET /api/admin/gear/ - List all gear with inventory details
+    POST /api/admin/gear/ - Create new gear item
+    """
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        gears = Gear.objects.all().order_by('name')
+        serializer = GearSerializer(gears, many=True)
+        return Response({'count': gears.count(), 'gear': serializer.data}, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        data = request.data.copy()
+        if not data.get('gear_id'):
+            import uuid
+            data['gear_id'] = f"gear-{uuid.uuid4().hex[:8]}"
+        serializer = GearSerializer(data=data)
+        if serializer.is_valid():
+            gear = serializer.save()
+            return Response({'message': 'Gear created successfully.', 'gear': GearSerializer(gear).data}, status=status.HTTP_201_CREATED)
+        return Response({'message': 'Validation failed.', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class AdminGearDetailView(APIView):
+    """
+    GET /api/admin/gear/<str:gear_id>/ - Retrieve gear
+    PATCH /api/admin/gear/<str:gear_id>/ - Update gear
+    DELETE /api/admin/gear/<str:gear_id>/ - Delete gear
+    """
+    permission_classes = [IsAdminUser]
+
+    def get_object(self, gear_id):
+        return Gear.objects.filter(gear_id__iexact=gear_id).first() or get_object_or_404(Gear, gear_id=gear_id)
+
+    def get(self, request, gear_id):
+        gear = self.get_object(gear_id)
+        return Response({'gear': GearSerializer(gear).data}, status=status.HTTP_200_OK)
+
+    def patch(self, request, gear_id):
+        gear = self.get_object(gear_id)
+        serializer = GearSerializer(gear, data=request.data, partial=True)
+        if serializer.is_valid():
+            updated = serializer.save()
+            return Response({'message': 'Gear updated successfully.', 'gear': GearSerializer(updated).data}, status=status.HTTP_200_OK)
+        return Response({'message': 'Update failed.', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, gear_id):
+        gear = self.get_object(gear_id)
+        gear.delete()
+        return Response({'message': 'Gear deleted successfully.'}, status=status.HTTP_200_OK)
+
+
+class AdminDeliveryPartnerView(APIView):
+    """
+    GET /api/admin/delivery-partners/ - List delivery partners with assigned order counts
+    PATCH /api/admin/delivery-partners/<int:partner_id>/ - Update status/details
+    """
+    permission_classes = [IsAdminUser]
+
+    def get(self, request, partner_id=None):
+        if partner_id:
+            partner = get_object_or_404(DeliveryPartner, id=partner_id)
+            orders = partner.deliveries.all().order_by('-created_at')
+            return Response({
+                'partner': DeliveryPartnerSerializer(partner).data,
+                'orders': OrderListSerializer(orders, many=True).data
+            }, status=status.HTTP_200_OK)
+
+        partners = DeliveryPartner.objects.all().order_by('name')
+        data = []
+        for p in partners:
+            p_data = DeliveryPartnerSerializer(p).data
+            p_data['assigned_orders_count'] = p.deliveries.filter(order_status__in=['packed', 'shipped', 'out_for_delivery']).count()
+            data.append(p_data)
+        return Response({'count': len(data), 'delivery_partners': data}, status=status.HTTP_200_OK)
+
+    def patch(self, request, partner_id):
+        partner = get_object_or_404(DeliveryPartner, id=partner_id)
+        serializer = DeliveryPartnerSerializer(partner, data=request.data, partial=True)
+        if serializer.is_valid():
+            updated = serializer.save()
+            return Response({'message': 'Delivery partner updated.', 'partner': DeliveryPartnerSerializer(updated).data}, status=status.HTTP_200_OK)
+        return Response({'message': 'Update failed.', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class AdminCustomerListView(APIView):
+    """
+    GET /api/admin/customers/ - List customers with stats
+    GET /api/admin/customers/<int:user_id>/ - Get customer details
+    """
+    permission_classes = [IsAdminUser]
+
+    def get(self, request, user_id=None):
+        from django.contrib.auth.models import User
+        if user_id:
+            user = get_object_or_404(User, id=user_id)
+            orders = user.orders.all().order_by('-created_at')
+            from users.models import Notification
+            notifications = Notification.objects.filter(user=user).order_by('-created_at')[:10]
+            phone = user.profile.phone_number if hasattr(user, 'profile') else ''
+            total_spend = orders.filter(payment_status__in=['paid', 'cod_pending']).aggregate(tot=Sum('total_amount'))['tot'] or Decimal('0.00')
+            return Response({
+                'id': user.id,
+                'name': f"{user.first_name} {user.last_name}".strip() or user.username,
+                'email': user.email,
+                'phone': phone,
+                'date_joined': user.date_joined.strftime('%Y-%m-%d') if user.date_joined else '',
+                'total_orders': orders.count(),
+                'lifetime_spend': str(total_spend),
+                'orders': OrderListSerializer(orders, many=True).data,
+                'notifications_count': notifications.count(),
+            }, status=status.HTTP_200_OK)
+
+        users = User.objects.all().order_by('-date_joined')
+        data = []
+        for u in users:
+            orders = u.orders.all()
+            paid_spend = orders.filter(payment_status__in=['paid', 'cod_pending']).aggregate(tot=Sum('total_amount'))['tot'] or Decimal('0.00')
+            current_rental = orders.filter(reservation_status__in=['Active', 'Upcoming']).first()
+            phone = u.profile.phone_number if hasattr(u, 'profile') else ''
+            data.append({
+                'id': u.id,
+                'name': f"{u.first_name} {u.last_name}".strip() or u.username,
+                'email': u.email,
+                'phone': phone,
+                'date_joined': u.date_joined.strftime('%Y-%m-%d') if u.date_joined else '',
+                'total_orders': orders.count(),
+                'lifetime_spend': str(paid_spend),
+                'current_rental': current_rental.order_id if current_rental else None,
+                'is_staff': u.is_staff,
+            })
+        return Response({'count': len(data), 'customers': data}, status=status.HTTP_200_OK)
+
+
+class AdminReservationListView(APIView):
+    """
+    GET /api/admin/reservations/ - List all rental reservations
+    """
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        reservations = RentalReservation.objects.select_related('gear', 'order', 'order__customer').order_by('-created_at')
+        serializer = RentalReservationSerializer(reservations, many=True)
+        return Response({'count': reservations.count(), 'reservations': serializer.data}, status=status.HTTP_200_OK)
+
+
+class GlobalSearchView(APIView):
+    """
+    GET /api/search/?q=<query>
+    Server-side search using PostgreSQL and Django ORM.
+    Returns structured results for gear/products, categories, destinations, and adventure kits.
+    """
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        query = request.query_params.get('q', '').strip()
+        if not query:
+            return Response({
+                'query': '',
+                'count': 0,
+                'gear': [],
+                'categories': [],
+                'destinations': [],
+                'kits': []
+            }, status=status.HTTP_200_OK)
+
+        clean_q = query[:100]
+
+        # 1. Gear / Products Search (limit 8)
+        gear_qs = Gear.objects.filter(
+            Q(name__icontains=clean_q) |
+            Q(category__icontains=clean_q) |
+            Q(brand__icontains=clean_q) |
+            Q(sku__icontains=clean_q)
+        ).exclude(category='Adventure Kit').distinct()[:8]
+
+        gear_results = []
+        for g in gear_qs:
+            gear_results.append({
+                'id': g.gear_id,
+                'name': g.name,
+                'category': g.category or 'Trekking Gear',
+                'brand': g.brand or 'PeakKit',
+                'price': str(g.daily_rental_price),
+                'url': f"/explore?q={g.name}"
+            })
+
+        # 2. Adventure Kits Search (limit 6)
+        seen_kit_slugs = set()
+        kits_results = []
+
+        from rentals.models import AdventureKit
+        adv_kits = AdventureKit.objects.filter(
+            Q(name__icontains=clean_q) |
+            Q(destination__icontains=clean_q) |
+            Q(description__icontains=clean_q)
+        ).distinct()[:6]
+
+        for ak in adv_kits:
+            seen_kit_slugs.add(ak.slug)
+            kits_results.append({
+                'id': ak.kit_id,
+                'name': ak.name,
+                'destination': ak.destination,
+                'category': 'Adventure Kit',
+                'price': str(ak.total_daily_price),
+                'url': f"/adventure-kit/{ak.slug}"
+            })
+
+        kits_qs = Gear.objects.filter(
+            category='Adventure Kit'
+        ).filter(
+            Q(name__icontains=clean_q) |
+            Q(brand__icontains=clean_q)
+        ).distinct()[:6]
+
+        for k in kits_qs:
+            kit_slug = k.gear_id.replace('kit-', '')
+            if kit_slug not in seen_kit_slugs:
+                seen_kit_slugs.add(kit_slug)
+                kits_results.append({
+                    'id': k.gear_id,
+                    'name': k.name,
+                    'category': 'Adventure Kit',
+                    'url': f"/adventure-kit/{kit_slug}"
+                })
+
+        # 3. Categories matching query
+        STANDARD_CATEGORIES = [
+            'Backpacks', 'Jackets', 'Sleeping Bags', 'Camping',
+            'Footwear', 'Cooking', 'Safety', 'Accessories'
+        ]
+        matched_categories = set(
+            Gear.objects.filter(category__icontains=clean_q)
+            .exclude(category='Adventure Kit')
+            .values_list('category', flat=True)
+            .distinct()[:5]
+        )
+        for cat in STANDARD_CATEGORIES:
+            if clean_q.lower() in cat.lower():
+                matched_categories.add(cat)
+
+        categories_results = [
+            {
+                'name': cat,
+                'url': f"/explore?category={cat}"
+            }
+            for cat in sorted(matched_categories) if cat
+        ][:5]
+
+        # 4. Destinations matching query
+        STANDARD_DESTINATIONS = [
+            'Everest Base Camp', 'Annapurna Base Camp', 'Langtang Valley',
+            'Mardi Himal', 'Gosaikunda', 'Upper Mustang', 'Manaslu Circuit',
+            'Ama Yangri', 'Shivapuri', 'Poon Hill', 'Rara Lake'
+        ]
+        matched_destinations = set(
+            Order.objects.filter(destination__icontains=clean_q)
+            .values_list('destination', flat=True)
+            .distinct()[:5]
+        )
+        for dest in STANDARD_DESTINATIONS:
+            if clean_q.lower() in dest.lower():
+                matched_destinations.add(dest)
+
+        destinations_results = [
+            {
+                'name': dest,
+                'url': f"/adventure-kit/{dest.lower().replace(' ', '-')}"
+            }
+            for dest in sorted(matched_destinations) if dest
+        ][:5]
+
+        total_count = len(gear_results) + len(categories_results) + len(destinations_results) + len(kits_results)
+
+        return Response({
+            'query': clean_q,
+            'count': total_count,
+            'gear': gear_results,
+            'categories': categories_results,
+            'destinations': destinations_results,
+            'kits': kits_results
+        }, status=status.HTTP_200_OK)
+
+
+# ==========================================
+# Module 7 — Public Gear & Adventure Kits
+# ==========================================
+
+class GearListView(APIView):
+    """
+    GET /api/gear/
+    Public listing of all available rental gear with filtering by category, brand, condition, and search query.
+    """
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        category = request.query_params.get('category')
+        brand = request.query_params.get('brand')
+        condition = request.query_params.get('condition')
+        search = request.query_params.get('q')
+        sort_by = request.query_params.get('sort', 'popular')
+
+        qs = Gear.objects.all()
+        if category and category != 'All gear':
+            qs = qs.filter(category__iexact=category)
+        if brand:
+            qs = qs.filter(brand__iexact=brand)
+        if condition:
+            qs = qs.filter(condition__iexact=condition)
+        if search:
+            qs = qs.filter(Q(name__icontains=search) | Q(brand__icontains=search) | Q(category__icontains=search))
+
+        if sort_by == 'price_low':
+            qs = qs.order_by('daily_rental_price')
+        elif sort_by == 'price_high':
+            qs = qs.order_by('-daily_rental_price')
+        else:
+            qs = qs.order_by('-quantity_available', 'name')
+
+        serializer = GearSerializer(qs, many=True)
+        return Response({
+            'count': qs.count(),
+            'gear': serializer.data
+        }, status=status.HTTP_200_OK)
+
+
+class GearDetailView(APIView):
+    """
+    GET /api/gear/<gear_id>/
+    Get detailed information about a specific gear item.
+    """
+    permission_classes = [AllowAny]
+
+    def get(self, request, gear_id):
+        gear = Gear.objects.filter(gear_id=gear_id).first() or get_object_or_404(
+            Gear, id=int(gear_id) if str(gear_id).isdigit() else 0
+        )
+        serializer = GearSerializer(gear)
+        return Response({
+            'gear': serializer.data
+        }, status=status.HTTP_200_OK)
+
+
+class AdventureKitListView(APIView):
+    """
+    GET /api/kits/
+    Public list of adventure kits with dynamic availability and constituent items.
+    """
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        category = request.query_params.get('category')
+        destination = request.query_params.get('destination')
+        qs = AdventureKit.objects.filter(is_active=True).prefetch_related('items__gear')
+        if category:
+            qs = qs.filter(category__iexact=category)
+        if destination:
+            qs = qs.filter(destination__icontains=destination)
+
+        serializer = AdventureKitSerializer(qs, many=True)
+        return Response({
+            'count': qs.count(),
+            'kits': serializer.data
+        }, status=status.HTTP_200_OK)
+
+
+class AdventureKitDetailView(APIView):
+    """
+    GET /api/kits/<slug>/
+    Get detailed kit by slug with all constituent items and dynamic availability.
+    """
+    permission_classes = [AllowAny]
+
+    def get(self, request, slug):
+        kit = get_object_or_404(AdventureKit.objects.prefetch_related('items__gear'), slug=slug)
+        serializer = AdventureKitSerializer(kit)
+        return Response({
+            'kit': serializer.data
+        }, status=status.HTTP_200_OK)
+
+
+class AdminKitListView(APIView):
+    """
+    GET /api/admin/kits/ - List all kits
+    POST /api/admin/kits/ - Create new Adventure Kit bundle with items
+    """
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        kits = AdventureKit.objects.all().prefetch_related('items__gear')
+        serializer = AdventureKitSerializer(kits, many=True)
+        return Response({'count': kits.count(), 'kits': serializer.data}, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        data = request.data
+        name = data.get('name')
+        if not name:
+            return Response({'error': 'Name is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        import re
+        slug = data.get('slug') or re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')
+        kit_id = data.get('kit_id') or f"KIT-{slug.upper()[:12]}"
+
+        kit, _ = AdventureKit.objects.update_or_create(
+            slug=slug,
+            defaults={
+                'kit_id': kit_id,
+                'name': name,
+                'category': data.get('category', 'Trekking'),
+                'destination': data.get('destination', ''),
+                'difficulty': data.get('difficulty', 'Moderate'),
+                'duration_days': data.get('duration_days', '7-10 days'),
+                'base_discount_percent': int(data.get('base_discount_percent', 20)),
+                'banner_image': data.get('banner_image', '/images/packages/ebc-kit.jpg'),
+                'description': data.get('description', ''),
+                'season': data.get('season', 'All year'),
+            }
+        )
+
+        items_data = data.get('items', [])
+        if items_data:
+            AdventureKitItem.objects.filter(kit=kit).delete()
+            for item in items_data:
+                g_id = item.get('gear_id') or item.get('gear')
+                gear_obj = Gear.objects.filter(Q(gear_id=g_id) | Q(pk=int(g_id) if str(g_id).isdigit() else 0)).first()
+                if gear_obj:
+                    AdventureKitItem.objects.create(
+                        kit=kit,
+                        gear=gear_obj,
+                        quantity=int(item.get('quantity', 1)),
+                        is_optional=bool(item.get('is_optional', False)),
+                    )
+
+        serializer = AdventureKitSerializer(kit)
+        return Response({'message': 'Kit bundle saved successfully', 'kit': serializer.data}, status=status.HTTP_201_CREATED)
+
+
+class AdminKitDetailView(APIView):
+    """
+    PATCH /api/admin/kits/<kit_id>/
+    DELETE /api/admin/kits/<kit_id>/
+    """
+    permission_classes = [IsAdminUser]
+
+    def patch(self, request, kit_id):
+        kit = get_object_or_404(AdventureKit, Q(kit_id=kit_id) | Q(id=int(kit_id) if str(kit_id).isdigit() else 0))
+        for field in ['name', 'category', 'destination', 'difficulty', 'duration_days', 'base_discount_percent', 'banner_image', 'description', 'season', 'is_active']:
+            if field in request.data:
+                setattr(kit, field, request.data[field])
+        kit.save()
+
+        if 'items' in request.data:
+            AdventureKitItem.objects.filter(kit=kit).delete()
+            for item in request.data['items']:
+                g_id = item.get('gear_id') or item.get('gear')
+                gear_obj = Gear.objects.filter(Q(gear_id=g_id) | Q(pk=int(g_id) if str(g_id).isdigit() else 0)).first()
+                if gear_obj:
+                    AdventureKitItem.objects.create(
+                        kit=kit,
+                        gear=gear_obj,
+                        quantity=int(item.get('quantity', 1)),
+                        is_optional=bool(item.get('is_optional', False)),
+                    )
+
+        serializer = AdventureKitSerializer(kit)
+        return Response({'message': 'Kit updated', 'kit': serializer.data}, status=status.HTTP_200_OK)
+
+    def delete(self, request, kit_id):
+        kit = get_object_or_404(AdventureKit, Q(kit_id=kit_id) | Q(id=int(kit_id) if str(kit_id).isdigit() else 0))
+        kit.delete()
+        return Response({'message': 'Kit deleted successfully'}, status=status.HTTP_200_OK)
+

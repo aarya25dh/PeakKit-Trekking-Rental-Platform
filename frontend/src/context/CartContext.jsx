@@ -60,7 +60,21 @@ export function CartProvider({ children }) {
     }
   }, [computedDays, pickupDate, returnDate]);
 
-  const addItem = (item) =>
+  const addItem = (item) => {
+    if (typeof window !== "undefined" && typeof window.fbq === "function") {
+      try {
+        window.fbq("track", "AddToCart", {
+          content_name: item.name,
+          content_ids: [item.id || item.gear_id],
+          content_type: "product",
+          value: Number(item.rentalPrice || item.price_per_day || 500),
+          currency: "NPR",
+        });
+      } catch (err) {
+        console.debug("Meta Pixel AddToCart error:", err);
+      }
+    }
+
     setItems((current) => {
       const found = current.find((entry) => entry.id === item.id);
       const itemDuration = computedDays || item.duration || 7;
@@ -72,6 +86,7 @@ export function CartProvider({ children }) {
           )
         : [...current, { ...item, quantity: 1, duration: itemDuration }];
     });
+  };
 
   const updateQuantity = (id, delta) =>
     setItems((current) =>

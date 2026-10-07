@@ -1,12 +1,12 @@
 import PageHero from "../components/common/PageHero";
 import { HERO_IMAGES } from "../data/imagePaths";
 
-function PageFrame({ title, eyebrow = "PeakKit" }) {
+function PageFrame({ title, eyebrow = "TRAIL GUIDE" }) {
   return (
     <section>
       <PageHero
         title={title}
-        subtitle="A considered space for your next mountain day, prepared with the PeakKit community in mind."
+        subtitle="A considered space for your next mountain day, prepared with the Himalayan trekking community in mind."
         image={HERO_IMAGES.langtang}
         breadcrumb={`${eyebrow.toUpperCase()} / ${title.toUpperCase()}`}
       />

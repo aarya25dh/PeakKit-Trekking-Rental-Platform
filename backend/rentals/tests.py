@@ -9,7 +9,7 @@ from unittest.mock import patch
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from rentals.models import Order, TrackingEvent, DeliveryPartner
+from rentals.models import Order, TrackingEvent, DeliveryPartner, Gear
 from rentals.status_engine import OrderStatusEngine
 from users.models import Notification, Profile
 
@@ -861,5 +861,159 @@ class InventoryAndAdminManagementTests(TestCase):
             self.assertIn(f'filename="{filename}"', res['Content-Disposition'])
             content = res.content.decode('utf-8')
             self.assertGreater(len(content.splitlines()), 0)
+
+
+class GlobalSearchTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.gear = Gear.objects.create(
+            gear_id='gear-search-01',
+            name='Everest Summit Tent',
+            category='Camping',
+            brand='Mountain Hardwear',
+            daily_rental_price=Decimal('1500.00'),
+            quantity_total=5,
+            quantity_available=5,
+        )
+
+    def test_global_search_empty_query(self):
+        res = self.client.get('/api/search/')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        data = res.json()
+        self.assertEqual(data['count'], 0)
+        self.assertEqual(data['gear'], [])
+
+    def test_global_search_matching_query(self):
+        res = self.client.get('/api/search/?q=Everest')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        data = res.json()
+        self.assertGreater(data['count'], 0)
+        self.assertTrue(any(g['name'] == 'Everest Summit Tent' for g in data['gear']))
+        self.assertTrue(any('Everest' in d['name'] for d in data['destinations']))
+
+    def test_global_search_category_and_destination(self):
+        res = self.client.get('/api/search/?q=backpack')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        data = res.json()
+        self.assertTrue(any('Backpack' in c['name'] for c in data['categories']))
+
+
+class AdventureKitAndCatalogTests(TestCase):
+    def setUp(self):
+        from rentals.models import Gear, AdventureKit, AdventureKitItem
+        self.client = APIClient()
+        self.gear1 = Gear.objects.create(
+            gear_id='gear-cat-01',
+            name='Osprey Aether 65',
+            category='Backpacks',
+            brand='Osprey',
+            daily_rental_price=Decimal('600.00'),
+            quantity_total=5,
+            quantity_available=5,
+        )
+        self.gear2 = Gear.objects.create(
+            gear_id='gear-cat-02',
+            name='Rab Down Parka',
+            category='Jackets',
+            brand='Rab',
+            daily_rental_price=Decimal('500.00'),
+            quantity_total=4,
+            quantity_available=4,
+        )
+        self.kit = AdventureKit.objects.create(
+            kit_id='KIT-TEST-01',
+            slug='test-expedition-kit',
+            name='Test Expedition Kit',
+            category='Trekking',
+            destination='Everest Base Camp',
+            difficulty='Moderate',
+            base_discount_percent=20,
+        )
+        AdventureKitItem.objects.create(kit=self.kit, gear=self.gear1, quantity=1)
+        AdventureKitItem.objects.create(kit=self.kit, gear=self.gear2, quantity=1)
+
+    def test_public_gear_listing_and_filtering(self):
+        res = self.client.get('/api/gear/')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertGreaterEqual(res.json()['count'], 2)
+
+        # Filter by category
+        res_filtered = self.client.get('/api/gear/?category=Backpacks')
+        self.assertEqual(res_filtered.status_code, status.HTTP_200_OK)
+        self.assertTrue(all(g['category'] == 'Backpacks' for g in res_filtered.json()['gear']))
+
+    def test_public_kit_listing_and_detail(self):
+        res = self.client.get('/api/kits/')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertGreaterEqual(res.json()['count'], 1)
+
+        # Detail by slug
+        res_detail = self.client.get(f'/api/kits/{self.kit.slug}/')
+        self.assertEqual(res_detail.status_code, status.HTTP_200_OK)
+        data = res_detail.json()['kit']
+        self.assertEqual(data['name'], 'Test Expedition Kit')
+        self.assertEqual(len(data['items']), 2)
+        self.assertTrue(data['is_available'])
+
+
+@override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend')
+class FastOrderConfirmationAndIdempotencyTests(TestCase):
+    """
+    Verifies that order creation returns immediately without blocking on external WhatsApp / email dispatches.
+    """
+    def setUp(self):
+        import time
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            username='speedcustomer',
+            email='speed@peakkit.com',
+            password='Test@1234',
+            first_name='Fast',
+            last_name='User'
+        )
+        Profile.objects.get_or_create(user=self.user)
+        self.client.force_authenticate(user=self.user)
+        self.gear = Gear.objects.create(
+            gear_id='speed-gear-01',
+            name='Mountain Tent 3P',
+            category='Tents',
+            brand='Black Diamond',
+            daily_rental_price=Decimal('800.00'),
+            quantity_total=10,
+            quantity_available=10,
+        )
+
+    def test_order_creation_is_fast_and_non_blocking(self):
+        import time
+        start_time = time.time()
+        res = self.client.post('/api/orders/create/', {
+            'destination': 'Langtang Valley',
+            'address': 'Dhungedhara, Kathmandu',
+            'landmark': 'Near Water Tank',
+            'payment_method': 'card',
+            'rental_start_date': str(timezone.now().date() + timedelta(days=2)),
+            'rental_end_date': str(timezone.now().date() + timedelta(days=9)),
+            'gear_id': self.gear.gear_id,
+            'items': [{
+                'id': self.gear.gear_id,
+                'name': self.gear.name,
+                'rentalPrice': 800,
+                'quantity': 1,
+            }],
+            'subtotal': '5600.00',
+            'delivery_charge': '500.00',
+            'security_deposit': '1000.00',
+        }, format='json')
+        duration = time.time() - start_time
+
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        data = res.json()
+        self.assertEqual(data['message'], 'Order created successfully.')
+        self.assertIn('order', data)
+        self.assertTrue(data['order']['order_id'].startswith('PK-'))
+        # Must execute within 1.5 seconds locally even if external services are unconfigured / offline
+        self.assertLess(duration, 1.5, f"Order creation took {duration:.2f}s, exceeding fast threshold.")
+
+
 
 

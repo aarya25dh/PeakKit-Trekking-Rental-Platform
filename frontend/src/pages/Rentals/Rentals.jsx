@@ -12,8 +12,11 @@ import {
   XCircle,
 } from "lucide-react";
 import PageHero from "../../components/common/PageHero";
+import SEO from "../../components/common/SEO";
+import { OrderCardSkeleton } from "../../components/common/Skeleton";
 import { HERO_IMAGES } from "../../data/imagePaths";
 import { ordersAPI } from "../../services/api";
+import { useAuth } from "../../context/AuthContext";
 import toast from "react-hot-toast";
 
 const statusConfig = {
@@ -55,12 +58,17 @@ const statusConfig = {
 };
 
 function Rentals() {
+  const { isAuthenticated } = useAuth();
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const location = useLocation();
   const navigate = useNavigate();
 
   const fetchOrders = async () => {
+    if (!isAuthenticated && !localStorage.getItem("access_token")) {
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       const res = await ordersAPI.getAll();
@@ -89,35 +97,56 @@ function Rentals() {
 
   useEffect(() => {
     fetchOrders();
-  }, [location.state?.newOrderId]);
+  }, [location.state?.newOrderId, isAuthenticated]);
 
   return (
     <main className="bg-[#f9fafb] pb-24">
+      <SEO
+        title="Your Trail Gear Rentals & Expedition Orders"
+        description="View your active and completed trekking equipment rentals, delivery tracking, and returns."
+        canonical="/rentals"
+        noIndex={false}
+      />
       <PageHero
         image={HERO_IMAGES.langtang}
-        breadcrumb="PEAKKIT / ORDER HISTORY"
+        breadcrumb="TRAIL / ORDER HISTORY"
         title="Your Trail Reservations"
         subtitle="Manage active equipment rentals, track deliveries, and view completed mountain expeditions."
       />
 
       <div className="mx-auto max-w-7xl px-5 py-12 lg:px-8">
         {loading ? (
-          <div className="space-y-4">
-            {[1, 2, 3].map((n) => (
-              <div
-                key={n}
-                className="h-44 animate-pulse rounded-3xl border border-slate-200 bg-white"
-              />
+          <div className="grid gap-6 md:grid-cols-2">
+            {[1, 2, 3, 4].map((n) => (
+              <OrderCardSkeleton key={n} />
             ))}
+          </div>
+        ) : !isAuthenticated && !localStorage.getItem("access_token") ? (
+          <div className="rounded-[2.5rem] border border-dashed border-amber-300 bg-amber-50/60 p-12 text-center">
+            <div className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-amber-100 text-amber-800">
+              <Compass size={32} />
+            </div>
+            <h2 className="mt-4 font-display text-2xl font-bold text-green-950">
+              Sign In to View Your Reservations
+            </h2>
+            <p className="mt-2 text-sm text-slate-600 max-w-md mx-auto">
+              Please sign in to access your booked expeditions, active gear rentals, and live order tracking.
+            </p>
+            <Link
+              to="/login?redirect=/rentals"
+              className="mt-6 inline-flex items-center gap-2 rounded-full bg-green-900 px-6 py-3 text-sm font-bold text-white transition hover:bg-green-800 shadow-sm"
+            >
+              Sign In to Account
+            </Link>
           </div>
         ) : orders.length === 0 ? (
           <div className="rounded-[2.5rem] border border-dashed border-slate-300 bg-white p-12 text-center">
             <div className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-amber-50 text-amber-700">
               <Compass size={32} />
             </div>
-            <h3 className="mt-4 font-display text-2xl font-bold text-green-950">
+            <h2 className="mt-4 font-display text-2xl font-bold text-green-950">
               No active gear reservations found
-            </h3>
+            </h2>
             <p className="mt-2 text-sm text-slate-500 max-w-md mx-auto">
               You haven&apos;t reserved any expedition kits yet. Explore our gear
               catalog to gear up for your next adventure in Nepal.

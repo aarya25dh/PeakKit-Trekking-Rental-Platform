@@ -350,29 +350,38 @@ class OrderStatusEngine:
         if not send_external:
             return
 
-        notification_data = OrderStatusEngine._prepare_notification_data(order)
+        import threading
 
-        email_key = status
-        if status == 'confirmed':
-            email_key = 'confirmed'
-        template_name = OrderStatusEngine.EMAIL_TEMPLATES.get(email_key)
-        if template_name:
-            OrderStatusEngine._send_email_notification(order, template_name, notification_data)
+        def _dispatch_external():
+            try:
+                notification_data = OrderStatusEngine._prepare_notification_data(order)
 
-        if status == 'confirmed' and order.payment_status in ('paid', 'cod_pending'):
-            OrderStatusEngine._send_email_notification(
-                order, OrderStatusEngine.EMAIL_TEMPLATES['paid'], notification_data
-            )
+                email_key = status
+                if status == 'confirmed':
+                    email_key = 'confirmed'
+                template_name = OrderStatusEngine.EMAIL_TEMPLATES.get(email_key)
+                if template_name:
+                    OrderStatusEngine._send_email_notification(order, template_name, notification_data)
 
-        if status == 'delivered' and order.return_date:
-            OrderStatusEngine._send_email_notification(
-                order, OrderStatusEngine.EMAIL_TEMPLATES['return'], notification_data
-            )
+                if status == 'confirmed' and order.payment_status in ('paid', 'cod_pending'):
+                    OrderStatusEngine._send_email_notification(
+                        order, OrderStatusEngine.EMAIL_TEMPLATES['paid'], notification_data
+                    )
 
-        OrderStatusEngine._send_customer_whatsapp(order, status, notification_data)
+                if status == 'delivered' and order.return_date:
+                    OrderStatusEngine._send_email_notification(
+                        order, OrderStatusEngine.EMAIL_TEMPLATES['return'], notification_data
+                    )
 
-        if status in ('packed', 'shipped', 'out_for_delivery') and order.delivery_partner:
-            OrderStatusEngine._send_rider_whatsapp(order, notification_data)
+                OrderStatusEngine._send_customer_whatsapp(order, status, notification_data)
+
+                if status in ('packed', 'shipped', 'out_for_delivery') and order.delivery_partner:
+                    OrderStatusEngine._send_rider_whatsapp(order, notification_data)
+            except Exception as exc:
+                logger.error(f"Error in background notification dispatch for order {order.order_id}: {str(exc)}")
+
+        thread = threading.Thread(target=_dispatch_external, daemon=True)
+        thread.start()
 
     @staticmethod
     def _prepare_notification_data(order):

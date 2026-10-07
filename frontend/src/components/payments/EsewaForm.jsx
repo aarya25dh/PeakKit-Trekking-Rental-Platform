@@ -35,7 +35,7 @@ function EsewaForm({ amount, onSuccess }) {
         merchant: "PeakKit Nepal",
         merchantCode: "PEAKKIT123",
       });
-    }, 1100);
+    }, 300);
   };
 
   return (

@@ -23,11 +23,12 @@ class ProfileSerializer(serializers.ModelSerializer):
 class UserSerializer(serializers.ModelSerializer):
     """Serializer for basic user information."""
     profile = ProfileSerializer(read_only=True)
+    is_staff = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = User
-        fields = ['id', 'first_name', 'last_name', 'email', 'profile']
-        read_only_fields = ['id']
+        fields = ['id', 'first_name', 'last_name', 'email', 'is_staff', 'profile']
+        read_only_fields = ['id', 'is_staff']
 
 
 class RegistrationSerializer(serializers.Serializer):
@@ -93,21 +94,36 @@ class RegistrationSerializer(serializers.Serializer):
 
 
 class LoginSerializer(serializers.Serializer):
-    """Serializer for user login."""
-    email = serializers.EmailField(required=True)
+    """Serializer for user login supporting email or username."""
+    email = serializers.CharField(required=False, allow_blank=True)
+    username = serializers.CharField(required=False, allow_blank=True)
     password = serializers.CharField(write_only=True, required=True)
 
     def validate(self, data):
         """Validate login credentials."""
-        email = data.get('email')
+        identifier = str(data.get('email') or data.get('username') or '').strip()
         password = data.get('password')
 
-        # Find user by email
-        try:
-            user = User.objects.get(email=email)
-        except User.DoesNotExist:
+        if not identifier:
             raise serializers.ValidationError({
-                'email': 'User with this email does not exist.'
+                'email': 'Please provide your email address or username.'
+            })
+
+        # Flexible user lookup by email or username
+        from django.db.models import Q
+        username_part = identifier.split('@')[0] if '@' in identifier else identifier
+        user = (
+            User.objects.filter(
+                Q(username__iexact=identifier) |
+                Q(email__iexact=identifier) |
+                Q(username__iexact=username_part) |
+                Q(email__istartswith=username_part + '@')
+            ).first()
+        )
+
+        if not user:
+            raise serializers.ValidationError({
+                'email': 'User not found. Please check your username or email address.'
             })
 
         # Safely get or create profile
@@ -121,6 +137,7 @@ class LoginSerializer(serializers.Serializer):
             })
 
         # Authenticate user
+        from django.contrib.auth import authenticate
         authenticated_user = authenticate(username=user.username, password=password)
 
         if authenticated_user is None:
@@ -140,7 +157,9 @@ class LoginSerializer(serializers.Serializer):
         # Reset failed login attempts on successful login
         profile.failed_login_attempts = 0
         profile.account_locked_until = None
-        profile.last_login_ip = self.context.get('request').META.get('REMOTE_ADDR')
+        req = self.context.get('request')
+        if req and hasattr(req, 'META'):
+            profile.last_login_ip = req.META.get('REMOTE_ADDR')
         profile.save()
 
         data['user'] = authenticated_user
@@ -250,17 +269,19 @@ class ChangePasswordSerializer(serializers.Serializer):
 
 class UpdateProfileSerializer(serializers.ModelSerializer):
     """Serializer for updating user profile."""
+    username = serializers.CharField(source='user.username', read_only=True)
     first_name = serializers.CharField(max_length=150, source='user.first_name')
     last_name = serializers.CharField(max_length=150, source='user.last_name')
     email = serializers.EmailField(source='user.email', read_only=True)
+    is_staff = serializers.BooleanField(source='user.is_staff', read_only=True)
 
     class Meta:
         model = Profile
         fields = [
-            'first_name', 'last_name', 'email', 'phone_number',
+            'username', 'first_name', 'last_name', 'email', 'is_staff', 'phone_number',
             'profile_image', 'address', 'city', 'province'
         ]
-        read_only_fields = ['email', 'phone_number']
+        read_only_fields = ['username', 'email', 'phone_number', 'is_staff']
 
     def update(self, instance, validated_data):
         """Update profile and user data."""

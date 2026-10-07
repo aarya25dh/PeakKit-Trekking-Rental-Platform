@@ -32,7 +32,7 @@ function ProductCard({ product }) {
   };
 
   return (
-    <article className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-lg">
+    <article className="group overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm transition-all duration-300 hover:-translate-y-1.5 hover:shadow-xl">
       <div className="relative aspect-[4/3] overflow-hidden bg-stone-100">
         {imgError || !product.image ? (
           <ImagePlaceholder aspectRatio="aspect-[4/3]" text="Image Coming Soon" subtext={product.name} />

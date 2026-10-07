@@ -1,0 +1,22 @@
+# PeakKit robots.txt
+User-agent: *
+Allow: /
+Allow: /explore
+Allow: /adventure-kit
+Allow: /gear-advisor
+Allow: /about
+Allow: /contact
+Allow: /community
+Allow: /product/
+Allow: /rentals
+
+# Disallow private and admin endpoints
+Disallow: /admin/
+Disallow: /api/
+Disallow: /checkout
+Disallow: /profile
+
+# Sitemap location
+Sitemap: /sitemap.xml
+Sitemap: http://localhost:5173/sitemap.xml
+Sitemap: https://localhost:5173/sitemap.xml

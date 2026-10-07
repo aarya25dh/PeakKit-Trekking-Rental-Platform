@@ -33,7 +33,7 @@ function KhaltiForm({ amount, onSuccess }) {
         phone: khaltiId,
         email: `${khaltiId}@khalti.com`,
       });
-    }, 1100);
+    }, 300);
   };
 
   return (

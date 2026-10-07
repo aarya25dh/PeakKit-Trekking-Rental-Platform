@@ -3,66 +3,82 @@ import {
   Check,
   ChevronLeft,
   Heart,
+  Loader2,
   Mountain,
   ShieldCheck,
   ShoppingBag,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import toast from "react-hot-toast";
 import { useCart } from "../../context/CartContext";
 import { useWishlist } from "../../context/WishlistContext";
-
-const trekKits = [
-  ["Everest Base Camp", "Challenging", "14–16 days", "NPR 12,500", "22%", "everest.jpg"],
-  ["Annapurna Base Camp", "Moderate", "10–12 days", "NPR 8,900", "28%", "annapurna.jpg"],
-  ["Mardi Himal", "Moderate", "5–7 days", "NPR 5,600", "35%", "mardi.jpg"],
-  ["Langtang Valley", "Moderate", "7–9 days", "NPR 6,800", "31%", "langtang.jpg"],
-  ["Gosaikunda", "Moderate", "5–7 days", "NPR 5,200", "38%", "gosaikunda.jpg"],
-  ["Ama Yangri", "Easy", "2–3 days", "NPR 2,400", "42%", "ama-yangri.jpg"],
-  ["Upper Mustang", "Challenging", "12–14 days", "NPR 11,800", "24%", "upper-mustang.jpg"],
-  ["Manaslu Circuit", "Challenging", "16–18 days", "NPR 14,500", "20%", "manaslu.jpg"],
-];
-
-const otherKits = [
-  ["Shivapuri Hike", "Easy", "1 day", "NPR 1,200", "hike-shivapuri.jpg"],
-  ["Nagarkot Sunrise", "Easy", "1 day", "NPR 900", "hike-nagarkot.jpg"],
-  ["Champadevi", "Easy", "1 day", "NPR 850", "hike-champadevi.jpg"],
-  ["Phulchowki", "Moderate", "1 day", "NPR 1,400", "hike-phulchowki.jpg"],
-  ["Weekend Camping", "Easy", "2 days", "NPR 3,800", "camp-weekend.jpg"],
-  ["Family Camping", "Easy", "2 days", "NPR 5,600", "camp-family.jpg"],
-  ["Solo Camping", "Moderate", "2 days", "NPR 3,200", "camp-solo.jpg"],
-  ["Luxury Camping", "Easy", "2 days", "NPR 8,500", "camp-luxury.jpg"],
-];
-
-const included = [
-  "45L trekking backpack",
-  "Weatherproof shell jacket",
-  "Warm sleeping system",
-  "Trekking poles",
-  "Headlamp",
-  "First aid essentials",
-  "Rain cover",
-  "Water filter",
-];
-
-/** Parse "NPR 12,500" → 12500 */
-function parsePrice(priceStr) {
-  return parseInt(priceStr.replace(/[^0-9]/g, ""), 10) || 0;
-}
+import SEO, { BASE_URL } from "../../components/common/SEO";
+import { kitsAPI } from "../../services/api";
 
 function AdventureKit() {
   const { kitName } = useParams();
-  const selected = trekKits.find(
-    (kit) => kit[0].toLowerCase().replaceAll(" ", "-") === kitName
-  );
-  const [removed, setRemoved] = useState([]);
+  const [kits, setKits] = useState([]);
+  const [selectedKit, setSelectedKit] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [removedItemIds, setRemovedItemIds] = useState([]);
 
-  if (selected)
-    return <KitDetails kit={selected} removed={removed} setRemoved={setRemoved} />;
+  useEffect(() => {
+    setLoading(true);
+    if (kitName) {
+      kitsAPI
+        .getBySlug(kitName)
+        .then((res) => {
+          setSelectedKit(res.data.kit);
+        })
+        .catch((err) => {
+          console.error("Failed to load kit:", err);
+        })
+        .finally(() => setLoading(false));
+    } else {
+      kitsAPI
+        .getAll()
+        .then((res) => {
+          setKits(res.data.kits || []);
+        })
+        .catch((err) => {
+          console.error("Failed to load kits:", err);
+        })
+        .finally(() => setLoading(false));
+    }
+  }, [kitName]);
+
+  if (loading) {
+    return (
+      <div className="flex min-h-[60vh] flex-col items-center justify-center">
+        <Loader2 className="h-10 w-10 animate-spin text-green-900" />
+        <p className="mt-4 text-sm text-slate-500 font-semibold">
+          Loading Himalayan Adventure Kits...
+        </p>
+      </div>
+    );
+  }
+
+  if (kitName && selectedKit) {
+    return (
+      <KitDetails
+        kit={selectedKit}
+        removedItemIds={removedItemIds}
+        setRemovedItemIds={setRemovedItemIds}
+      />
+    );
+  }
+
+  const trekkingKits = kits.filter((k) => k.category === "Trekking");
+  const otherKits = kits.filter((k) => k.category !== "Trekking");
 
   return (
     <main>
+      <SEO
+        title="Curated Adventure Kits — Expedition Gear Packages"
+        description="Ready-made gear bundles curated for Everest Base Camp, Annapurna, Mardi Himal, Langtang, and camping. Save up to 35% with complete trekking packages."
+        canonical="/adventure-kit"
+      />
       {/* Hero */}
       <section className="relative overflow-hidden bg-green-950 px-5 py-24 text-white lg:px-8">
         <img
@@ -73,120 +89,217 @@ function AdventureKit() {
         />
         <div className="relative mx-auto max-w-7xl">
           <p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-300">
-            PeakKit / Curated gear
+            Trail Packages / Curated Gear
           </p>
           <h1 className="mt-4 max-w-3xl font-display text-5xl font-semibold sm:text-7xl">
-            Adventure kits for every trail in Nepal.
+            Complete expedition bundles for Himalayan trails.
           </h1>
           <p className="mt-6 max-w-xl text-lg leading-8 text-white/70">
-            Ready-made gear bundles curated by destination, season, and the way
-            you like to travel.
+            Ready-made gear packages curated by destination, elevation, season, and terrain requirements.
           </p>
         </div>
       </section>
 
-      <KitSection title="Trekking kits" kits={trekKits} trek />
-      <KitSection title="Hiking kits" kits={otherKits.slice(0, 4)} />
-      <KitSection title="Camping kits" kits={otherKits.slice(4)} />
+      <KitSection title="High-Altitude Trekking Kits" kits={trekkingKits.length ? trekkingKits : kits} />
+      {otherKits.length > 0 && (
+        <KitSection title="Camping & Hiking Kits" kits={otherKits} />
+      )}
     </main>
   );
 }
 
-function KitSection({ title, kits, trek }) {
+function KitSection({ title, kits }) {
   return (
     <section className="mx-auto max-w-7xl px-5 py-20 lg:px-8">
-      <h2 className="font-display text-3xl font-semibold text-green-950">{title}</h2>
-      <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-        {kits.map((kit) => (
-          <article
-            key={kit[0]}
-            className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-lg"
-          >
-            <div className="aspect-[1.1] bg-[#315843]">
-              <img
-                src={`/images/${trek ? "destinations" : "packages"}/${kit[5] || kit[4]}`}
-                alt={kit[0]}
-                loading="lazy"
-                onError={(e) => (e.currentTarget.style.opacity = "0")}
-                className="h-full w-full object-cover"
-              />
-            </div>
-            <div className="p-5">
-              <h3 className="font-display text-xl font-semibold">{kit[0]}</h3>
-              <p className="mt-2 text-sm text-slate-500">
-                {kit[1]} · {kit[2]}
-              </p>
-              <strong className="mt-4 block text-green-900">{kit[3]}</strong>
-              <p className="mt-1 text-xs text-green-700">
-                Save {kit[4] || "20%"} vs buying
-              </p>
-              <Link
-                to={`/adventure-kit/${kit[0].toLowerCase().replaceAll(" ", "-")}`}
-                className="mt-5 inline-flex items-center gap-2 text-sm font-bold text-green-900"
-              >
-                View kit <ArrowRight size={15} />
-              </Link>
-            </div>
-          </article>
-        ))}
+      <div className="flex items-end justify-between">
+        <h2 className="font-display text-3xl font-semibold text-green-950">
+          {title}
+        </h2>
+        <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+          {kits.length} bundles ready
+        </span>
+      </div>
+      <div className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {kits.map((kit) => {
+          const banner = kit.banner_image || `/images/packages/${kit.slug}.jpg`;
+          return (
+            <article
+              key={kit.id || kit.slug}
+              className="group overflow-hidden rounded-3xl border border-slate-200/80 bg-white shadow-sm transition-all duration-300 hover:-translate-y-1.5 hover:shadow-xl hover:border-emerald-800/40 flex flex-col justify-between"
+            >
+              <div>
+                <div className="relative aspect-[4/3] bg-stone-100 overflow-hidden">
+                  <img
+                    src={banner}
+                    alt={kit.name}
+                    loading="lazy"
+                    onError={(e) => {
+                      e.currentTarget.style.opacity = "0";
+                    }}
+                    className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
+                  />
+                  <div className="absolute left-3 top-3 flex gap-1.5">
+                    <span className="rounded-full bg-white/90 px-3 py-1 text-xs font-semibold text-green-950 backdrop-blur-xs">
+                      {kit.difficulty}
+                    </span>
+                    <span className="rounded-full bg-amber-100/90 px-3 py-1 text-xs font-bold text-amber-900">
+                      Save {kit.base_discount_percent}%
+                    </span>
+                  </div>
+                </div>
+                <div className="p-5">
+                  <h3 className="font-display text-lg font-bold text-slate-900 group-hover:text-green-900">
+                    {kit.name}
+                  </h3>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {kit.duration_days} · {kit.destination}
+                  </p>
+                  <p className="mt-2 text-xs text-slate-600 line-clamp-2 leading-relaxed">
+                    {kit.description}
+                  </p>
+                </div>
+              </div>
+              <div className="p-5 pt-0">
+                <div className="mt-2 flex items-baseline justify-between border-t border-slate-100 pt-3">
+                  <div>
+                    <span className="text-xs text-slate-400">Bundle from</span>
+                    <strong className="block text-base font-bold text-green-900">
+                      NPR {kit.total_daily_price?.toLocaleString()} <span className="text-xs font-normal text-slate-500">/ day</span>
+                    </strong>
+                  </div>
+                  <span
+                    className={`text-xs font-semibold ${
+                      kit.is_available ? "text-emerald-700" : "text-amber-700"
+                    }`}
+                  >
+                    {kit.is_available ? "In Stock" : "Limited Stock"}
+                  </span>
+                </div>
+                <Link
+                  to={`/adventure-kit/${kit.slug}`}
+                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-full bg-green-900 px-4 py-2.5 text-xs font-bold text-white transition hover:bg-green-800"
+                >
+                  <span>Explore Kit Bundle</span>
+                  <ArrowRight size={14} />
+                </Link>
+              </div>
+            </article>
+          );
+        })}
       </div>
     </section>
   );
 }
 
-function KitDetails({ kit, removed, setRemoved }) {
+function KitDetails({ kit, removedItemIds, setRemovedItemIds }) {
   const navigate = useNavigate();
-  const { addItem, items } = useCart();
+  const { addItem, items: cartItems } = useCart();
   const { toggleItem, isSaved } = useWishlist();
 
-  const visible = included.filter((item) => !removed.includes(item));
+  const kitItems = kit.items || [];
+  const activeItems = kitItems.filter(
+    (item) => !removedItemIds.includes(item.id)
+  );
 
-  // Build cart item from kit data
-  const kitId = `kit-${kit[0].toLowerCase().replaceAll(" ", "-")}`;
-  const rentalPrice = parsePrice(kit[3]);
-  const inCart = items.some((i) => i.id === kitId);
-  const saved = isSaved(kitId);
+  // Calculate dynamic price based on remaining constituent items
+  const dynamicDailyTotal = activeItems.reduce((acc, item) => {
+    const p = parseFloat(item.override_daily_price || item.daily_rental_price || 500);
+    return acc + p * item.quantity;
+  }, 0);
+
+  const discountedDaily = Math.round(
+    dynamicDailyTotal * (1 - (kit.base_discount_percent || 20) / 100)
+  );
+
+  const inCart = cartItems.some((i) => i.id === kit.kit_id);
+  const saved = isSaved(kit.kit_id);
+
+  useEffect(() => {
+    if (!kit) return;
+    if (typeof window !== "undefined" && typeof window.fbq === "function") {
+      try {
+        window.fbq("track", "ViewContent", {
+          content_name: kit.name,
+          content_ids: [kit.kit_id || kit.id || kit.slug],
+          content_type: "product",
+          value: discountedDaily || kit.total_daily_price || 0,
+          currency: "NPR",
+        });
+      } catch (err) {
+        console.debug("Meta Pixel ViewContent error:", err);
+      }
+    }
+  }, [kit?.kit_id || kit?.id || kit?.slug]);
 
   const handleAddToCart = () => {
     addItem({
-      id: kitId,
-      name: `${kit[0]} Adventure Kit`,
-      rentalPrice,
-      image: `/images/destinations/${kit[5]}`,
+      id: kit.kit_id,
+      name: kit.name,
+      rentalPrice: discountedDaily,
+      price: `NPR ${discountedDaily}`,
+      image: kit.banner_image,
       category: "Adventure Kit",
       brand: "PeakKit",
       condition: "New",
-      availability: "Available",
+      availability: kit.is_available ? "Available" : "Reserved",
       rating: "5.0",
-      deposit: `NPR ${Math.round(rentalPrice * 0.6).toLocaleString()}`,
+      deposit: `NPR ${Math.round(discountedDaily * 2.5).toLocaleString()}`,
       duration: 1,
     });
     toast.success(
-      inCart
-        ? `${kit[0]} kit quantity updated`
-        : `${kit[0]} kit added to cart!`
+      inCart ? `${kit.name} quantity updated` : `${kit.name} added to cart!`
     );
     navigate("/cart");
   };
 
   const handleWishlist = () => {
     toggleItem({
-      id: kitId,
-      name: `${kit[0]} Adventure Kit`,
-      rentalPrice,
-      image: `/images/destinations/${kit[5]}`,
+      id: kit.kit_id,
+      name: kit.name,
+      rentalPrice: discountedDaily,
+      image: kit.banner_image,
       category: "Adventure Kit",
       brand: "PeakKit",
-      condition: "New",
-      availability: "Available",
-      rating: "5.0",
-      deposit: `NPR ${Math.round(rentalPrice * 0.6).toLocaleString()}`,
     });
     toast.success(saved ? "Removed from wishlist" : "Saved to wishlist");
   };
 
+  const toggleRemoveItem = (itemId) => {
+    if (removedItemIds.includes(itemId)) {
+      setRemovedItemIds(removedItemIds.filter((id) => id !== itemId));
+    } else {
+      setRemovedItemIds([...removedItemIds, itemId]);
+    }
+  };
+
+  const kitSchema = {
+    "@context": "https://schema.org",
+    "@type": "Product",
+    name: kit.name,
+    description: kit.description,
+    brand: {
+      "@type": "Brand",
+      name: "PeakKit",
+    },
+    offers: {
+      "@type": "Offer",
+      priceCurrency: "NPR",
+      price: discountedDaily,
+      availability: kit.is_available
+        ? "https://schema.org/InStock"
+        : "https://schema.org/LimitedAvailability",
+      url: `${BASE_URL}/adventure-kit/${kit.slug}`,
+    },
+  };
+
   return (
     <main className="mx-auto max-w-7xl px-5 py-10 lg:px-8">
+      <SEO
+        title={`${kit.name} — Adventure Rental`}
+        description={`Rent complete ${kit.name} trekking gear bundle. Difficulty: ${kit.difficulty}, Duration: ${kit.duration_days}. Includes sanitized backpack, shell jacket, sleeping system & poles.`}
+        canonical={`/adventure-kit/${kit.slug}`}
+        schema={kitSchema}
+      />
       <Link
         to="/adventure-kit"
         className="inline-flex items-center gap-2 text-sm font-semibold text-green-900"
@@ -195,63 +308,87 @@ function KitDetails({ kit, removed, setRemoved }) {
       </Link>
 
       <div className="mt-8 grid gap-10 lg:grid-cols-2">
-        {/* Image */}
-        <div className="aspect-[1.1] overflow-hidden rounded-[2rem] bg-[#315843]">
+        {/* Banner */}
+        <div className="aspect-[1.1] overflow-hidden rounded-[2rem] bg-stone-100">
           <img
-            src={`/images/destinations/${kit[5]}`}
-            alt={kit[0]}
+            src={kit.banner_image}
+            alt={kit.name}
             className="h-full w-full object-cover"
-            onError={(e) => (e.currentTarget.style.opacity = "0")}
+            onError={(e) => {
+              e.currentTarget.style.opacity = "0";
+            }}
           />
         </div>
 
         {/* Details */}
         <div>
-          <p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-600">
-            Curated for the route
-          </p>
-          <h1 className="mt-3 font-display text-5xl font-semibold text-green-950">
-            {kit[0]} Kit
+          <div className="flex items-center gap-2">
+            <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-900">
+              {kit.base_discount_percent}% Bundle Savings
+            </span>
+            <span className="rounded-full bg-stone-100 px-3 py-1 text-xs font-semibold text-slate-700">
+              {kit.difficulty}
+            </span>
+          </div>
+          <h1 className="mt-3 font-display text-4xl sm:text-5xl font-semibold text-green-950">
+            {kit.name}
           </h1>
-          <p className="mt-4 text-lg text-slate-500">
-            {kit[1]} · {kit[2]} · {kit[4]} savings
+          <p className="mt-3 text-sm text-slate-500">
+            {kit.duration_days} · {kit.destination} · {kit.season}
+          </p>
+          <p className="mt-4 text-sm text-slate-600 leading-relaxed">
+            {kit.description}
           </p>
 
-          <div className="mt-7 rounded-2xl bg-green-50 p-6">
-            <span className="text-sm text-slate-500">Rental total</span>
-            <strong className="mt-1 block font-display text-4xl text-green-900">
-              {kit[3]}
-            </strong>
-            <span className="mt-1 block text-sm text-green-700">
-              Deposit: NPR {Math.round(rentalPrice * 0.6).toLocaleString()}
+          <div className="mt-7 rounded-2xl bg-green-50/70 border border-green-900/10 p-6">
+            <div className="flex items-baseline justify-between">
+              <div>
+                <span className="text-xs font-semibold text-slate-500">
+                  Dynamic Daily Rental ({activeItems.length} items)
+                </span>
+                <strong className="mt-1 block font-display text-3xl text-green-900">
+                  NPR {discountedDaily.toLocaleString()} <span className="text-sm font-normal text-slate-500">/ day</span>
+                </strong>
+              </div>
+              <div className="text-right">
+                <span className="text-xs text-slate-400 line-through">
+                  NPR {Math.round(dynamicDailyTotal).toLocaleString()}
+                </span>
+                <span className="block text-xs font-bold text-emerald-700">
+                  Save NPR {Math.round(dynamicDailyTotal - discountedDaily).toLocaleString()} / day
+                </span>
+              </div>
+            </div>
+            <span className="mt-3 block border-t border-green-900/10 pt-3 text-xs text-green-800">
+              Refundable Deposit: NPR {Math.round(discountedDaily * 2.5).toLocaleString()}
             </span>
           </div>
 
-          <div className="mt-7 grid gap-3 text-sm text-slate-600">
+          <div className="mt-7 grid gap-2 text-xs font-medium text-slate-600">
             <span className="flex items-center gap-2">
-              <ShieldCheck size={17} className="text-green-700" />
-              Weather-compatible for {kit[0]}
+              <ShieldCheck size={16} className="text-green-700" />
+              100% Sanitized & Mountain-Tested Equipment
             </span>
             <span className="flex items-center gap-2">
-              <Mountain size={17} className="text-green-700" />
-              Sizes S–XL available
+              <Mountain size={16} className="text-green-700" />
+              Calibrated for {kit.destination || "high-altitude expeditions"}
             </span>
           </div>
 
           <div className="mt-7 flex gap-3">
             <button
               onClick={handleAddToCart}
-              className="flex items-center gap-2 rounded-full bg-green-900 px-5 py-3 text-sm font-bold text-white transition hover:bg-green-800"
+              className="flex items-center gap-2 rounded-full bg-green-900 px-7 py-3.5 text-sm font-bold text-white transition hover:bg-green-800 shadow-md"
             >
-              <ShoppingBag size={16} />
-              {inCart ? "Update cart" : "Add entire kit to cart"}
+              <ShoppingBag size={17} />
+              {inCart ? "Update Cart Bundle" : "Add Bundle to Cart"}
             </button>
             <button
               onClick={handleWishlist}
               aria-label="Save kit"
               className={`grid h-12 w-12 place-items-center rounded-full border transition ${
                 saved
-                  ? "border-red-400 text-red-500"
+                  ? "border-red-400 text-red-500 bg-red-50"
                   : "border-green-900 text-green-900 hover:bg-green-50"
               }`}
             >
@@ -261,32 +398,70 @@ function KitDetails({ kit, removed, setRemoved }) {
         </div>
       </div>
 
-      {/* Included items */}
-      <section className="mt-20">
-        <h2 className="font-display text-3xl font-semibold text-green-950">
-          Everything included
-        </h2>
-        <p className="mt-3 text-slate-500">
-          Remove any item you already own and we will recalculate your kit.
-        </p>
-        <div className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {visible.map((item) => (
-            <div
-              key={item}
-              className="flex items-start justify-between rounded-xl border border-slate-200 bg-white p-4"
-            >
-              <span className="flex gap-2 text-sm font-semibold">
-                <Check size={16} className="mt-0.5 text-green-700" />
-                {item}
-              </span>
-              <button
-                onClick={() => setRemoved([...removed, item])}
-                className="text-xs text-slate-400 hover:text-red-600"
+      {/* Constituent gear items */}
+      <section className="mt-20 border-t border-stone-200 pt-12">
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+          <div>
+            <h2 className="font-display text-3xl font-semibold text-green-950">
+              Constituent Gear in this Bundle
+            </h2>
+            <p className="mt-2 text-sm text-slate-500">
+              Already have some of this equipment? Click to remove items and your bundle price will automatically adjust.
+            </p>
+          </div>
+          <span className="text-xs font-bold text-amber-800 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-full shrink-0">
+            {activeItems.length} of {kitItems.length} items selected
+          </span>
+        </div>
+
+        <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {kitItems.map((item) => {
+            const isRemoved = removedItemIds.includes(item.id);
+            return (
+              <div
+                key={item.id}
+                className={`flex items-start gap-4 rounded-2xl border p-4 transition ${
+                  isRemoved
+                    ? "border-dashed border-slate-300 bg-stone-50 opacity-60"
+                    : "border-slate-200 bg-white shadow-2xs"
+                }`}
               >
-                Remove
-              </button>
-            </div>
-          ))}
+                <div className="h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-stone-100">
+                  <img
+                    src={item.gear_image || "/images/products/backpack1.jpg"}
+                    alt={item.gear_name}
+                    className="h-full w-full object-cover"
+                    onError={(e) => {
+                      e.currentTarget.style.opacity = "0";
+                    }}
+                  />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h4 className="font-display text-sm font-bold text-slate-900 line-clamp-1">
+                    {item.gear_name}
+                  </h4>
+                  <p className="text-xs text-slate-400">
+                    {item.gear_category} · {item.quantity}x
+                  </p>
+                  <div className="mt-2 flex items-center justify-between">
+                    <strong className="text-xs text-green-900 font-semibold">
+                      NPR {item.daily_rental_price} / day
+                    </strong>
+                    <button
+                      onClick={() => toggleRemoveItem(item.id)}
+                      className={`text-xs font-bold ${
+                        isRemoved
+                          ? "text-emerald-700 hover:underline"
+                          : "text-slate-400 hover:text-red-600"
+                      }`}
+                    >
+                      {isRemoved ? "+ Include back" : "− Remove from kit"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </section>
     </main>

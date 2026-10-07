@@ -1,16 +1,22 @@
 import { Clock3, Mail, MapPin, Phone, Send } from "lucide-react";
 import PageHero from "../../components/common/PageHero";
+import SEO from "../../components/common/SEO";
 import { HERO_IMAGES } from "../../data/imagePaths";
 
 function Contact() {
   return (
     <main>
+      <SEO
+        title="Contact Us"
+        description="Get in touch with PeakKit for gear rental inquiries, trekking advice, delivery options, and partnerships. We're based in Thamel, Kathmandu."
+        canonical="/contact"
+      />
       {/* Hero Section */}
       <PageHero
         image={HERO_IMAGES.contactNepal}
-        breadcrumb="PEAKKIT / CONTACT"
+        breadcrumb="HELP / CONTACT"
         title="Let's Plan Your Next Adventure"
-        subtitle="Questions about rentals, pickups, destinations or partnerships? PeakKit is here to help."
+        subtitle="Questions about gear bookings, delivery times, or route advice? Our Kathmandu gear team is here to assist."
       />
 
       {/* Contact Section */}

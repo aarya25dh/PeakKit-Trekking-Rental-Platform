@@ -1,13 +1,18 @@
 import { ArrowRight, Mountain } from "lucide-react";
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 import toast from "react-hot-toast";
 import { useAuth } from "../../context/AuthContext";
 import { authAPI } from "../../services/api";
+import SEO from "../../components/common/SEO";
 
 function Register() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { login } = useAuth();
+
+  const searchParams = new URLSearchParams(location.search);
+  const redirectParam = searchParams.get("redirect") || searchParams.get("next");
 
   const [formData, setFormData] = useState({
     fullName: "",
@@ -79,8 +84,12 @@ function Register() {
 
       toast.success("Account created successfully!");
 
-      // Redirect to homepage without page reload
-      navigate("/");
+      // Redirect to intended page or homepage
+      if (redirectParam && redirectParam.startsWith("/") && !redirectParam.startsWith("/admin")) {
+        navigate(redirectParam);
+      } else {
+        navigate("/");
+      }
     } catch (err) {
       let msg = "Registration failed. Please check your information.";
       if (err.response?.data) {
@@ -123,6 +132,12 @@ function Register() {
 
   return (
     <main className="grid min-h-[680px] lg:grid-cols-2">
+      <SEO
+        title="Create Account"
+        description="Create your account to reserve premium trekking gear in Nepal with doorstep delivery and flexible rental durations."
+        canonical="/register"
+        noIndex={true}
+      />
       {/* Left: hero image panel — mirrors Login page */}
       <div className="relative hidden overflow-hidden bg-green-950 lg:block">
         <img
@@ -139,11 +154,11 @@ function Register() {
           </Link>
           <div className="absolute bottom-14 max-w-md">
             <p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-300">
-              Join the community
+              Join the Expedition
             </p>
-            <h1 className="mt-4 font-display text-5xl font-semibold">
+            <h2 className="mt-4 font-display text-5xl font-semibold">
               Make room for more mountains.
-            </h1>
+            </h2>
           </div>
         </div>
       </div>
@@ -155,7 +170,7 @@ function Register() {
             <Mountain />
           </div>
           <p className="mt-8 text-xs font-bold uppercase tracking-[0.2em] text-amber-600">
-            Join PeakKit
+            Start Your Journey
           </p>
           <h1 className="mt-3 font-display text-4xl font-semibold text-green-950">
             Create your account.

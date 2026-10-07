@@ -75,7 +75,7 @@ class WhatsAppService:
         )
 
         try:
-            with urllib.request.urlopen(req, timeout=10) as response:
+            with urllib.request.urlopen(req, timeout=3) as response:
                 res_body = response.read().decode('utf-8')
                 parsed = json.loads(res_body) if res_body else {'ok': True}
                 logger.info(f"WhatsApp message sent successfully to {payload.get('to')}")

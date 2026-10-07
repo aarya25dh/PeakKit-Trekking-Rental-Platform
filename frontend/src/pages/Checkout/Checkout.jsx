@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from 'react';
 import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
@@ -32,11 +32,14 @@ import {
 
 import { HERO_IMAGES } from "../../data/imagePaths";
 import { useCart } from "../../context/CartContext";
+import { useAuth } from "../../context/AuthContext";
 import { ordersAPI } from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
+import SEO from "../../components/common/SEO";
 
 function Checkout() {
   const navigate = useNavigate();
+  const { user, isAuthenticated } = useAuth();
   const {
     items,
     rentalSubtotal,
@@ -54,22 +57,35 @@ function Checkout() {
   // null | "selector" | "form"
   const [paymentModalState, setPaymentModalState] = useState(null);
   const [selectedMethod, setSelectedMethod] = useState("Credit / Debit Card");
+  const [isPlacingOrder, setIsPlacingOrder] = useState(false);
 
   // Delivery & Schedule state
   const [deliveryFee, setDeliveryFee] = useState(100);
   const [voucher, setVoucher] = useState(null);
 
-  // Customer basic info (empty strings with clean placeholders so user doesn't have to backspace prefilled text)
-  const [customerInfo, setCustomerInfo] = useState({
-    fullName: "",
-    email: "",
-    phone: "",
+  // Customer basic info
+  const [customerInfo, setCustomerInfo] = useState(() => ({
+    fullName: user?.first_name ? `${user.first_name} ${user.last_name || ""}`.trim() : "",
+    email: user?.email || "",
+    phone: user?.profile?.phone_number || "",
     address: "",
     city: "Kathmandu",
     province: "Bagmati",
     postalCode: "44600",
     emergencyContact: "",
-  });
+  }));
+
+  // Auto-fill customer info if user logs in while on checkout
+  useEffect(() => {
+    if (user) {
+      setCustomerInfo((prev) => ({
+        ...prev,
+        fullName: prev.fullName || `${user.first_name || ""} ${user.last_name || ""}`.trim() || user.username || "",
+        email: prev.email || user.email || "",
+        phone: prev.phone || user.profile?.phone_number || "",
+      }));
+    }
+  }, [user]);
 
   // Success & Sub-View State (null | "receipt" | "tracking")
   const [confirmedOrder, setConfirmedOrder] = useState(null);
@@ -97,6 +113,11 @@ function Checkout() {
   };
 
   const handleProceedToPayment = () => {
+    if (!isAuthenticated) {
+      toast.error("Please sign in to proceed with checkout.");
+      navigate("/login?redirect=/checkout");
+      return;
+    }
     setPaymentModalState("selector");
   };
 
@@ -106,13 +127,31 @@ function Checkout() {
   };
 
   const handlePaymentSuccess = async (paymentResult) => {
+    if (!isAuthenticated) {
+      toast.error("Please sign in to complete your reservation.");
+      navigate("/login?redirect=/checkout");
+      return;
+    }
+
     const methodMap = {
       "Credit / Debit Card": "card",
+      "card": "card",
       "PayPal": "paypal",
+      "PayPal Checkout": "paypal",
+      "paypal": "paypal",
+      "eSewa": "esewa",
       "eSewa Mobile Wallet": "esewa",
+      "esewa": "esewa",
+      "Khalti": "khalti",
       "Khalti Digital Wallet": "khalti",
+      "khalti": "khalti",
+      "Bank Transfer": "bank_transfer",
       "Direct Bank Transfer": "bank_transfer",
+      "Nepal Bank Transfer": "bank_transfer",
+      "bank_transfer": "bank_transfer",
       "Cash on Delivery": "cod",
+      "Cash on Delivery (COD)": "cod",
+      "cod": "cod",
     };
 
     const rawMethod = paymentResult.method || selectedMethod;
@@ -120,10 +159,14 @@ function Checkout() {
       methodMap[rawMethod] ||
       (rawMethod ? rawMethod.toLowerCase().replace(/[^a-z0-9]/g, "_") : "card");
 
-    const startDate = pickupDate || new Date().toISOString().split("T")[0];
-    const endDate =
-      returnDate ||
-      new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString().split("T")[0];
+    let startDate = pickupDate;
+    let endDate = returnDate;
+    if (!startDate || !endDate || new Date(endDate) <= new Date(startDate)) {
+      const now = new Date();
+      startDate = now.toISOString().split("T")[0];
+      const future = new Date(now.getTime() + (durationDays || 7) * 24 * 3600 * 1000);
+      endDate = future.toISOString().split("T")[0];
+    }
 
     const orderPayload = {
       destination: customerInfo.city || "Annapurna Base Camp",
@@ -134,10 +177,17 @@ function Checkout() {
         : "Near city center",
       phone_number:
         paymentResult.phone || customerInfo.phone || "9860467948",
+      customer_email: customerInfo.email || user?.email || "customer@peakkit.com",
       payment_method: payment_method,
       rental_start_date: startDate,
       rental_end_date: endDate,
-      gear_id: items.length > 0 ? items[0].id : undefined,
+      gear_id: items.length > 0 ? (items[0].id || items[0].gear_id) : undefined,
+      items: items.map((it) => ({
+        id: it.id || it.gear_id,
+        name: it.name,
+        rentalPrice: it.rentalPrice || it.price_per_day || 500,
+        quantity: it.quantity || 1,
+      })),
       subtotal: rentalSubtotal || 5000,
       delivery_charge: deliveryFee || 500,
       security_deposit: deposits || 1000,
@@ -145,65 +195,77 @@ function Checkout() {
       return_date: new Date(endDate).toISOString(),
     };
 
+    setPaymentModalState(null);
+    setIsPlacingOrder(true);
+
     try {
       const res = await ordersAPI.create(orderPayload);
-      const createdOrder = res.data?.order || {};
+      const createdOrder = res.data?.order || res.data || {};
 
-      setPaymentModalState(null);
+      // Fire Meta Pixel Purchase event upon confirmed order creation
+      if (typeof window !== "undefined" && typeof window.fbq === "function") {
+        try {
+          window.fbq("track", "Purchase", {
+            value: Number(createdOrder.total_amount || payableTotal),
+            currency: "NPR",
+            content_ids: items.map((i) => i.id || i.gear_id),
+            content_type: "product",
+            order_id: createdOrder.order_id || createdOrder.id || `PK-${new Date().getFullYear()}-000001`,
+          });
+        } catch (fbErr) {
+          console.debug("Meta Pixel Purchase error:", fbErr);
+        }
+      }
 
-      // Clear cart
-      if (clearCart) clearCart();
-
-      // Refresh notification drawer immediately
-      fetchNotifications();
-
-      // Show success toast
-      toast.success(
-        `Reservation confirmed! Order ${createdOrder.order_id || ""}`
-      );
-
-      // Navigate to Order History
-      navigate("/rentals", { state: { newOrderId: createdOrder.order_id } });
-    } catch (err) {
-      console.error("Order creation API error:", err);
-      // Fallback: create local confirmation if offline
-      const finalOrderId =
-        paymentResult.orderId || `PK-2026-${Math.floor(100000 + Math.random() * 900000)}`;
-      const finalTxnId =
-        paymentResult.txnId || `TXN-PK-${Math.floor(100000 + Math.random() * 900000)}`;
+      // Refresh notification drawer
+      if (fetchNotifications) fetchNotifications();
 
       const orderData = {
-        orderId: finalOrderId,
-        txnId: finalTxnId,
-        paymentMethod: paymentResult.method || selectedMethod,
-        customerName: paymentResult.customerName || customerInfo.fullName || "Aarya Dhungana",
-        phone: paymentResult.phone || customerInfo.phone || "+977-9860467948",
-        email: paymentResult.email || customerInfo.email || "dhungana21@gmail.com",
-        pickupDate,
-        returnDate,
-        durationDays,
+        orderId: createdOrder.order_id || `PK-${new Date().getFullYear()}-000001`,
+        txnId: createdOrder.transaction_id || paymentResult.txnId || `TXN-PK-000001`,
+        paymentMethod: rawMethod,
+        customerName:
+          user?.first_name
+            ? `${user.first_name} ${user.last_name || ""}`.trim()
+            : (paymentResult.customerName || customerInfo.fullName || "Trekking Adventurer"),
+        phone: createdOrder.customer_phone || customerInfo.phone || "9860467948",
+        email: createdOrder.customer_email || customerInfo.email || user?.email || "adventurer@peakkit.com",
+        pickupDate: createdOrder.rental_start_date || startDate,
+        returnDate: createdOrder.rental_end_date || endDate,
+        durationDays: createdOrder.rental_days || durationDays || 7,
         deliveryAddress:
-          paymentResult.deliveryAddress ||
+          createdOrder.address ||
           (customerInfo.address
             ? `${customerInfo.address}, ${customerInfo.city} (${customerInfo.postalCode || "44600"})`
             : "House 42, Gairidhara Road, Kathmandu (44600)"),
         items: items.length > 0 ? items : [],
-        rentalSubtotal,
-        deposits,
-        deliveryFee,
+        rentalSubtotal: Number(createdOrder.subtotal) || rentalSubtotal,
+        deposits: Number(createdOrder.security_deposit) || deposits,
+        deliveryFee: Number(createdOrder.delivery_charge) || deliveryFee,
         voucherDiscount,
-        grandTotal: payableTotal,
-        trackingId: "PKDLV-48393",
-        riderName: "Hari Sharma",
-        instructions: paymentResult.instructions || "Handle gear with care.",
+        grandTotal: Number(createdOrder.total_amount) || payableTotal,
+        trackingId: createdOrder.order_id || "PKDLV-48393",
+        riderName: "Hari Sharma (PeakKit Dispatch)",
+        instructions: paymentResult.instructions || "Handle expedition gear with care.",
       };
 
-      setPaymentModalState(null);
       setConfirmedOrder(orderData);
       setActiveSuccessView("receipt");
-      toast.success("Order confirmed successfully!");
+      setIsPlacingOrder(false);
+      toast.success("Your order has been placed successfully!");
       if (clearCart) clearCart();
       window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (err) {
+      setIsPlacingOrder(false);
+      console.error("Order creation API error:", err);
+      const errMsg =
+        err.response?.data?.message ||
+        err.response?.data?.detail ||
+        (typeof err.response?.data === "string" ? err.response.data : null) ||
+        (err.response?.data && typeof err.response.data === "object"
+          ? Object.entries(err.response.data).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : v}`).join("; ")
+          : "Failed to process reservation. Please check dates and equipment availability.");
+      toast.error(errMsg);
     }
   };
 
@@ -466,6 +528,12 @@ function Checkout() {
 
   return (
     <main className="bg-[#f9fafb] pb-24">
+      <SEO
+        title="Checkout & Payment"
+        description="Securely complete your gear rental booking with PeakKit."
+        canonical="/checkout"
+        noIndex={true}
+      />
       {/* Adventure Kits Left-Aligned Hero */}
       <PageHero
         image={HERO_IMAGES.checkoutBanner}
@@ -475,6 +543,30 @@ function Checkout() {
       />
 
       <div className="mx-auto max-w-7xl px-5 py-12 lg:px-8">
+        {!isAuthenticated && (
+          <div className="mb-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 rounded-3xl border border-amber-300 bg-amber-50 p-6 shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-amber-200 text-amber-900 font-bold">
+                !
+              </div>
+              <div>
+                <h4 className="font-bold text-amber-950 text-base">
+                  Sign in required to complete reservation
+                </h4>
+                <p className="text-xs text-amber-800">
+                  Please log in or register to secure gear under your PeakKit account.
+                </p>
+              </div>
+            </div>
+            <Link
+              to="/login?redirect=/checkout"
+              className="inline-flex shrink-0 items-center justify-center rounded-full bg-green-900 px-6 py-2.5 text-xs font-bold text-white transition hover:bg-green-800 shadow-sm"
+            >
+              Sign In to Checkout
+            </Link>
+          </div>
+        )}
+
         <div className="grid gap-10 lg:grid-cols-[1fr_380px]">
           {/* Left Column: ONLY Box 1 & Box 2 */}
           <div className="space-y-8">
@@ -746,42 +838,42 @@ function Checkout() {
             </div>
 
             <div className="mt-6">
-              {selectedMethod === "Credit / Debit Card" && (
+              {(selectedMethod.toLowerCase().includes("card") || selectedMethod.toLowerCase().includes("credit")) && (
                 <CreditCardForm
                   amount={payableTotal}
                   onSuccess={handlePaymentSuccess}
                 />
               )}
 
-              {selectedMethod === "PayPal" && (
+              {selectedMethod.toLowerCase().includes("paypal") && (
                 <PaypalForm
                   amount={payableTotal}
                   onSuccess={handlePaymentSuccess}
                 />
               )}
 
-              {selectedMethod === "eSewa" && (
+              {selectedMethod.toLowerCase().includes("esewa") && (
                 <EsewaForm
                   amount={payableTotal}
                   onSuccess={handlePaymentSuccess}
                 />
               )}
 
-              {selectedMethod === "Khalti" && (
+              {selectedMethod.toLowerCase().includes("khalti") && (
                 <KhaltiForm
                   amount={payableTotal}
                   onSuccess={handlePaymentSuccess}
                 />
               )}
 
-              {selectedMethod === "Bank Transfer" && (
+              {selectedMethod.toLowerCase().includes("bank") && (
                 <BankTransferForm
                   amount={payableTotal}
                   onSuccess={handlePaymentSuccess}
                 />
               )}
 
-              {selectedMethod === "Cash on Delivery" && (
+              {(selectedMethod.toLowerCase().includes("cash") || selectedMethod.toLowerCase().includes("cod")) && (
                 <CashOnDeliveryForm
                   amount={payableTotal}
                   onDeliveryChange={handleDeliveryZoneChange}
@@ -789,6 +881,23 @@ function Checkout() {
                 />
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Full-Screen Processing Overlay */}
+      {isPlacingOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-green-950/70 backdrop-blur-xs">
+          <div className="mx-4 max-w-sm rounded-3xl bg-white p-8 text-center shadow-2xl">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-800 animate-pulse">
+              <Compass className="animate-spin text-emerald-800" size={36} />
+            </div>
+            <h3 className="mt-5 font-display text-xl font-bold text-green-950">
+              Processing your order...
+            </h3>
+            <p className="mt-2 text-xs text-slate-500">
+              Securing equipment reservations and generating your confirmation...
+            </p>
           </div>
         </div>
       )}

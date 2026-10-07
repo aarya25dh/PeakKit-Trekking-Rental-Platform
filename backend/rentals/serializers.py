@@ -2,7 +2,10 @@ from decimal import Decimal
 from datetime import timedelta
 from django.utils import timezone
 from rest_framework import serializers
-from .models import Order, DeliveryPartner, TrackingEvent, CartItem, Gear, RentalReservation
+from .models import (
+    Order, DeliveryPartner, TrackingEvent, CartItem, Gear, RentalReservation,
+    AdventureKit, AdventureKitItem, OrderItem
+)
 
 
 class DeliveryPartnerSerializer(serializers.ModelSerializer):
@@ -33,7 +36,8 @@ class OrderListSerializer(serializers.ModelSerializer):
         fields = (
             'id', 'order_id', 'customer_name', 'destination', 'order_status',
             'reservation_status', 'rental_start_date', 'rental_end_date',
-            'rental_days', 'return_date', 'daily_rental_price', 'payment_status',
+            'rental_days', 'return_date', 'daily_rental_price', 'subtotal',
+            'delivery_charge', 'security_deposit', 'payment_status',
             'total_amount', 'created_at', 'delivery_partner_name'
         )
         read_only_fields = fields
@@ -131,6 +135,8 @@ class OrderCreateSerializer(serializers.ModelSerializer):
     security_deposit = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, default=Decimal('1000.00'))
     delivery_partner_id = serializers.IntegerField(required=False, allow_null=True)
     
+    items = serializers.ListField(child=serializers.DictField(), required=False, write_only=True)
+
     PAYMENT_METHOD_MAP = {
         'esewa': 'esewa',
         'e-sewa': 'esewa',
@@ -156,7 +162,7 @@ class OrderCreateSerializer(serializers.ModelSerializer):
         fields = (
             'customer_phone', 'customer_email', 'phone_number', 'destination', 'address',
             'landmark', 'payment_method', 'transaction_id', 'rental_start_date',
-            'rental_end_date', 'daily_rental_price', 'gear_id', 'subtotal',
+            'rental_end_date', 'daily_rental_price', 'gear_id', 'items', 'subtotal',
             'delivery_charge', 'security_deposit', 'estimated_delivery',
             'return_date', 'delivery_partner_id'
         )
@@ -256,9 +262,12 @@ class OrderCreateSerializer(serializers.ModelSerializer):
             tzinfo=timezone.get_current_timezone()
         )
 
-        # Availability overlap check if gear_id is provided
+        # Availability overlap check for items and gear_id
         from rentals.models import Gear, RentalReservation
         gear_id = attrs.pop('gear_id', None)
+        raw_items = attrs.pop('items', None) or []
+        gears_to_reserve = []
+
         if gear_id:
             gear, _ = Gear.objects.get_or_create(
                 gear_id=gear_id,
@@ -267,7 +276,22 @@ class OrderCreateSerializer(serializers.ModelSerializer):
                     'daily_rental_price': attrs.get('daily_rental_price', Decimal('500.00')),
                 }
             )
-            # Check overlap: requested dates intersect any existing reservation with status Reserved or Active
+            gears_to_reserve.append((gear, 1))
+
+        for raw_item in raw_items:
+            gid = raw_item.get('id') or raw_item.get('gear_id')
+            if gid and gid != gear_id:
+                gear_obj, _ = Gear.objects.get_or_create(
+                    gear_id=str(gid),
+                    defaults={
+                        'name': raw_item.get('name') or str(gid),
+                        'daily_rental_price': Decimal(str(raw_item.get('rentalPrice', 500))),
+                    }
+                )
+                qty = int(raw_item.get('quantity', 1))
+                gears_to_reserve.append((gear_obj, qty))
+
+        for gear, qty in gears_to_reserve:
             overlapping = RentalReservation.objects.filter(
                 gear=gear,
                 reservation_status__in=['Reserved', 'Active'],
@@ -275,32 +299,34 @@ class OrderCreateSerializer(serializers.ModelSerializer):
                 rental_end_date__gte=start_date
             ).order_by('rental_end_date')
 
-            if overlapping.exists():
+            total_stock = max(gear.quantity_total or 1, 1)
+            reserved_count = overlapping.count()
+
+            if reserved_count >= total_stock or (gear.quantity_available < qty and reserved_count > 0):
                 latest_conflict = overlapping.last()
-                next_date = latest_conflict.rental_end_date + timedelta(days=1)
-                # Ensure next_date does not fall into another reserved window
+                next_date = (latest_conflict.rental_end_date + timedelta(days=1)) if latest_conflict else (end_date + timedelta(days=1))
                 while RentalReservation.objects.filter(
                     gear=gear,
                     reservation_status__in=['Reserved', 'Active'],
                     rental_start_date__lte=next_date,
                     rental_end_date__gte=next_date
-                ).exists():
+                ).count() >= total_stock:
                     next_date += timedelta(days=1)
 
                 raise serializers.ValidationError({
-                    'message': 'Gear unavailable for selected dates.',
+                    'message': f'Gear unavailable for selected dates. ({gear.name})',
                     'next_available_date': next_date.strftime('%Y-%m-%d')
                 })
 
-            attrs['_gear'] = gear
-
+        attrs['_gears_to_reserve'] = gears_to_reserve
         return attrs
 
     def create(self, validated_data):
         from rentals.status_engine import OrderStatusEngine
-        from rentals.models import RentalReservation
+        from rentals.models import RentalReservation, Gear, OrderItem
+        from django.db import transaction
 
-        gear = validated_data.pop('_gear', None)
+        gears_to_reserve = validated_data.pop('_gears_to_reserve', [])
         request = self.context.get('request')
         if request and request.user.is_authenticated:
             validated_data['customer'] = request.user
@@ -328,8 +354,8 @@ class OrderCreateSerializer(serializers.ModelSerializer):
 
         order = Order.objects.create(**validated_data)
 
-        # Create RentalReservation if gear was specified
-        if gear:
+        # Create RentalReservations and OrderItem entries for all gear items in this order
+        for gear, qty in gears_to_reserve:
             RentalReservation.objects.create(
                 gear=gear,
                 order=order,
@@ -337,12 +363,22 @@ class OrderCreateSerializer(serializers.ModelSerializer):
                 rental_end_date=order.rental_end_date,
                 reservation_status='Active' if order.reservation_status == 'Active' else 'Reserved'
             )
-            from django.db import transaction
+            OrderItem.objects.get_or_create(
+                order=order,
+                gear=gear,
+                defaults={
+                    'item_name': gear.name,
+                    'quantity': qty,
+                    'daily_rental_price': gear.daily_rental_price,
+                    'subtotal': gear.daily_rental_price * Decimal(str(order.rental_days or 7)) * Decimal(str(qty))
+                }
+            )
             with transaction.atomic():
                 g = Gear.objects.select_for_update().get(pk=gear.pk)
                 if g.quantity_available > 0:
-                    g.quantity_available -= 1
-                    g.quantity_reserved += 1
+                    dec = min(g.quantity_available, qty)
+                    g.quantity_available -= dec
+                    g.quantity_reserved += dec
                     g.save()
 
         OrderStatusEngine.on_order_created(order, send_external=True)
@@ -444,4 +480,88 @@ class OrderStatusUpdateSerializer(serializers.Serializer):
         )
         instance.refresh_from_db()
         return instance
+
+
+class GearSerializer(serializers.ModelSerializer):
+    """Serializer for Gear inventory item CRUD."""
+    rental_price_per_day = serializers.DecimalField(max_digits=10, decimal_places=2, source='daily_rental_price', required=False)
+
+    class Meta:
+        model = Gear
+        fields = (
+            'id', 'gear_id', 'sku', 'name', 'category', 'brand', 'size',
+            'condition', 'purchase_price', 'daily_rental_price', 'rental_price_per_day',
+            'image_url',
+            'quantity_total', 'quantity_available', 'quantity_reserved',
+            'quantity_under_maintenance', 'sanitized_at', 'inspection_due',
+            'created_at', 'updated_at'
+        )
+        read_only_fields = ('id', 'created_at', 'updated_at')
+
+
+class RentalReservationSerializer(serializers.ModelSerializer):
+    """Serializer for RentalReservation read and management."""
+    gear_name = serializers.CharField(source='gear.name', read_only=True)
+    gear_sku = serializers.CharField(source='gear.sku', read_only=True)
+    order_id = serializers.CharField(source='order.order_id', read_only=True)
+    customer_email = serializers.CharField(source='order.customer.email', read_only=True)
+
+    class Meta:
+        model = RentalReservation
+        fields = (
+            'id', 'gear', 'gear_name', 'gear_sku', 'order', 'order_id',
+            'customer_email', 'rental_start_date', 'rental_end_date',
+            'reservation_status', 'created_at', 'updated_at'
+        )
+        read_only_fields = ('id', 'created_at', 'updated_at')
+
+
+class AdventureKitItemSerializer(serializers.ModelSerializer):
+    gear_name = serializers.CharField(source='gear.name', read_only=True)
+    gear_sku = serializers.CharField(source='gear.sku', read_only=True)
+    gear_brand = serializers.CharField(source='gear.brand', read_only=True)
+    gear_category = serializers.CharField(source='gear.category', read_only=True)
+    gear_image = serializers.CharField(source='gear.image_url', read_only=True)
+    daily_rental_price = serializers.DecimalField(source='gear.daily_rental_price', max_digits=10, decimal_places=2, read_only=True)
+    quantity_available = serializers.IntegerField(source='gear.quantity_available', read_only=True)
+
+    class Meta:
+        model = AdventureKitItem
+        fields = (
+            'id', 'kit', 'gear', 'gear_name', 'gear_sku', 'gear_brand',
+            'gear_category', 'gear_image', 'daily_rental_price',
+            'quantity_available', 'quantity', 'is_optional', 'override_daily_price'
+        )
+        read_only_fields = ('id',)
+
+
+class AdventureKitSerializer(serializers.ModelSerializer):
+    items = AdventureKitItemSerializer(many=True, read_only=True)
+    total_daily_price = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    undiscounted_daily_price = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    quantity_available = serializers.IntegerField(read_only=True)
+    is_available = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = AdventureKit
+        fields = (
+            'id', 'kit_id', 'slug', 'name', 'category', 'destination',
+            'difficulty', 'duration_days', 'base_discount_percent',
+            'banner_image', 'description', 'season', 'is_active',
+            'total_daily_price', 'undiscounted_daily_price',
+            'quantity_available', 'is_available', 'items',
+            'created_at', 'updated_at'
+        )
+        read_only_fields = ('id', 'created_at', 'updated_at')
+
+
+class OrderItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = OrderItem
+        fields = (
+            'id', 'order', 'gear', 'kit', 'item_name',
+            'quantity', 'daily_rental_price', 'subtotal', 'created_at'
+        )
+        read_only_fields = ('id', 'subtotal', 'created_at')
+
 

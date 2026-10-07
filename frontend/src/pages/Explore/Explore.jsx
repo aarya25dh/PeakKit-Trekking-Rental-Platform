@@ -1,56 +1,198 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { ChevronDown, Filter, Search, SlidersHorizontal, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { ChevronDown, Filter, Loader2, Search, SlidersHorizontal, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import ProductCard from "../../components/cards/ProductCard";
 import PageHero from "../../components/common/PageHero";
+import SEO, { BASE_URL } from "../../components/common/SEO";
 import { HERO_IMAGES } from "../../data/imagePaths";
-import { products } from "../../utils/constants";
+import { gearAPI } from "../../services/api";
+import { products as staticProducts } from "../../utils/constants";
 
-const chips = ["All gear", "Backpacks", "Jackets", "Sleeping Bags", "Footwear", "Camping", "Accessories", "Cooking", "Safety"];
-const filterGroups = { Category: ["Backpacks", "Jackets", "Sleeping Bags", "Footwear", "Camping", "Accessories", "Cooking", "Safety"], Destination: ["Annapurna", "Everest Base Camp", "Langtang Valley", "Mardi Himal"], Season: ["All year", "Winter"], Brand: ["Osprey", "Patagonia", "Rab", "Black Diamond", "PeakKit"], Condition: ["New", "Like new", "Excellent", "Good", "Verified"], Availability: ["Available", "Reserved"] };
+const chips = [
+  "All gear",
+  "Backpacks",
+  "Jackets",
+  "Sleeping Bags",
+  "Footwear",
+  "Camping",
+  "Accessories",
+  "Cooking",
+  "Safety",
+];
+
+const filterGroups = {
+  Category: [
+    "Backpacks",
+    "Jackets",
+    "Sleeping Bags",
+    "Footwear",
+    "Camping",
+    "Accessories",
+    "Cooking",
+    "Safety",
+  ],
+  Brand: [
+    "Osprey",
+    "Patagonia",
+    "Rab",
+    "Black Diamond",
+    "Deuter",
+    "La Sportiva",
+    "Scarpa",
+    "MSR",
+    "PeakKit",
+  ],
+  Condition: ["New", "Excellent", "Good"],
+  Availability: ["Available", "Reserved"],
+};
 
 function Explore() {
-  const [query, setQuery] = useState("");
-  const [activeChip, setActiveChip] = useState("All gear");
+  const [searchParams] = useSearchParams();
+  const initialQ = searchParams.get("q") || "";
+  const initialCategory = searchParams.get("category") || "";
+
+  const [query, setQuery] = useState(initialQ);
+  const [activeChip, setActiveChip] = useState(
+    initialCategory && chips.includes(initialCategory)
+      ? initialCategory
+      : "All gear"
+  );
   const [selected, setSelected] = useState({});
   const [sort, setSort] = useState("Most Popular");
   const [open, setOpen] = useState(false);
-  const [price, setPrice] = useState(1200);
+  const [price, setPrice] = useState(1500);
 
-  const toggle = (group, value) => setSelected((current) => ({ ...current, [group]: current[group] === value ? "" : value }));
+  // Dynamic server gear state
+  const [gearList, setGearList] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch real gear from backend API
+  useEffect(() => {
+    setLoading(true);
+    gearAPI
+      .getAll()
+      .then((res) => {
+        if (res.data?.gear && res.data.gear.length > 0) {
+          // Normalize gear items for ProductCard
+          const normalized = res.data.gear.map((g) => ({
+            id: g.gear_id || g.id,
+            gear_id: g.gear_id,
+            name: g.name,
+            category: g.category || "Trekking Gear",
+            brand: g.brand || "PeakKit",
+            rentalPrice: parseFloat(g.daily_rental_price || g.rental_price_per_day || 500),
+            price: `NPR ${Math.round(parseFloat(g.daily_rental_price || g.rental_price_per_day || 500))}`,
+            condition: g.condition || "good",
+            availability: g.quantity_available > 0 ? "Available" : "Reserved",
+            rating: "4.9",
+            reviewCount: 24,
+            deposit: `NPR ${Math.round(parseFloat(g.daily_rental_price || 500) * 2.5)}`,
+            image: g.image_url || "/images/products/backpack1.jpg",
+          }));
+          setGearList(normalized);
+        } else {
+          setGearList(staticProducts);
+        }
+      })
+      .catch((err) => {
+        console.warn("Falling back to static products for explore:", err);
+        setGearList(staticProducts);
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  // Sync state when URL params change (e.g. navigating from search results)
+  useEffect(() => {
+    const q = searchParams.get("q") || "";
+    const cat = searchParams.get("category") || "";
+    setQuery(q);
+    if (cat && chips.includes(cat)) setActiveChip(cat);
+  }, [searchParams]);
+
+  const toggle = (group, value) =>
+    setSelected((current) => ({
+      ...current,
+      [group]: current[group] === value ? "" : value,
+    }));
+
   const scrollToCategories = () => {
     const el = document.getElementById("gear-categories");
     if (el) el.scrollIntoView({ behavior: "smooth" });
   };
 
   const filtered = useMemo(() => {
-    const result = products.filter((product) => {
+    const dataset = gearList.length > 0 ? gearList : staticProducts;
+    const result = dataset.filter((product) => {
       const text = `${product.name} ${product.brand} ${product.category}`.toLowerCase();
-      return (!query || text.includes(query.toLowerCase())) &&
-        (activeChip === "All gear" || product.category === activeChip) &&
-        (!selected.Category || product.category === selected.Category) &&
-        (!selected.Destination || product.destinations.includes(selected.Destination)) &&
-        (!selected.Brand || product.brand === selected.Brand) &&
-        (!selected.Condition || product.condition === selected.Condition) &&
-        (!selected.Availability || product.availability === selected.Availability) &&
-        product.rentalPrice <= price;
+      const matchQuery = !query || text.includes(query.toLowerCase());
+      const matchChip =
+        activeChip === "All gear" ||
+        product.category?.toLowerCase() === activeChip.toLowerCase();
+      const matchCategory =
+        !selected.Category ||
+        product.category?.toLowerCase() === selected.Category.toLowerCase();
+      const matchBrand =
+        !selected.Brand ||
+        product.brand?.toLowerCase() === selected.Brand.toLowerCase();
+      const matchCondition =
+        !selected.Condition ||
+        product.condition?.toLowerCase() === selected.Condition.toLowerCase();
+      const matchAvailability =
+        !selected.Availability ||
+        product.availability?.toLowerCase() === selected.Availability.toLowerCase();
+      const matchPrice = product.rentalPrice <= price;
+
+      return (
+        matchQuery &&
+        matchChip &&
+        matchCategory &&
+        matchBrand &&
+        matchCondition &&
+        matchAvailability &&
+        matchPrice
+      );
     });
-    return [...result].sort((a, b) =>
-      sort === "Price Low to High"
-        ? a.rentalPrice - b.rentalPrice
-        : sort === "Price High to Low"
-        ? b.rentalPrice - a.rentalPrice
-        : b.rating - a.rating
-    );
-  }, [query, activeChip, selected, sort, price]);
+
+    return [...result].sort((a, b) => {
+      if (sort === "Price Low to High") return a.rentalPrice - b.rentalPrice;
+      if (sort === "Price High to Low") return b.rentalPrice - a.rentalPrice;
+      return parseFloat(b.rating || 4.9) - parseFloat(a.rating || 4.9);
+    });
+  }, [gearList, query, activeChip, selected, sort, price]);
+
+  const breadcrumbSchema = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      {
+        "@type": "ListItem",
+        position: 1,
+        name: "Home",
+        item: BASE_URL,
+      },
+      {
+        "@type": "ListItem",
+        position: 2,
+        name: "Explore Gear",
+        item: `${BASE_URL}/explore`,
+      },
+    ],
+  };
 
   return (
     <div className="bg-[#f9fafb]">
+      <SEO
+        title="Explore Trekking & Camping Gear"
+        description="Browse and rent trekking gear in Nepal — backpacks, jackets, sleeping bags, footwear, safety equipment and more. Filter by category, brand, and availability."
+        canonical="/explore"
+        schema={breadcrumbSchema}
+      />
       <PageHero
         image={HERO_IMAGES.exploreMarketplace}
-        breadcrumb="PEAKKIT / MARKETPLACE"
+        breadcrumb="EXPLORE / CATALOG"
         title="Explore Trekking & Camping Gear"
-        subtitle="Rent trusted trekking gear, reserve equipment before your trip, and discover outdoor essentials curated for Nepal's mountains."
+        subtitle="Browse sanitized alpine equipment, compare specifications, and reserve gear for your upcoming Himalayan expedition."
         primaryButton={{
           text: "Explore Categories",
           onClick: scrollToCategories,
@@ -65,7 +207,7 @@ function Explore() {
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            className="min-w-0 flex-1 bg-transparent px-4 py-2.5 text-slate-800 outline-none placeholder:text-slate-400"
+            className="min-w-0 flex-1 bg-transparent px-4 py-2.5 text-slate-800 outline-none placeholder:text-slate-400 text-sm"
             placeholder="Search backpacks, jackets, sleeping bags, trekking poles..."
           />
           {query && (
@@ -80,7 +222,10 @@ function Explore() {
         </div>
       </PageHero>
 
-      <div id="gear-categories" className="sticky top-[72px] z-20 border-b border-slate-200 bg-white/95 backdrop-blur">
+      <div
+        id="gear-categories"
+        className="sticky top-[72px] z-20 border-b border-slate-200 bg-white/95 backdrop-blur"
+      >
         <div className="mx-auto flex max-w-7xl gap-3 overflow-x-auto px-5 py-3 lg:px-8">
           {chips.map((chip) => (
             <button
@@ -88,7 +233,7 @@ function Explore() {
               onClick={() => setActiveChip(chip)}
               className={`whitespace-nowrap rounded-full px-4 py-2 text-sm font-semibold transition ${
                 activeChip === chip
-                  ? "bg-green-900 text-white"
+                  ? "bg-green-900 text-white shadow-xs"
                   : "bg-stone-100 text-slate-600 hover:bg-green-50 hover:text-green-900"
               }`}
             >
@@ -115,36 +260,56 @@ function Explore() {
               <select
                 value={sort}
                 onChange={(event) => setSort(event.target.value)}
-                className="bg-transparent font-semibold outline-none"
+                className="bg-transparent font-semibold outline-none text-xs sm:text-sm"
               >
                 <option>Most Popular</option>
-                <option>Newest Arrivals</option>
                 <option>Price Low to High</option>
                 <option>Price High to Low</option>
                 <option>Highest Rated</option>
-                <option>Best for Annapurna Base Camp</option>
-                <option>Best for Everest Base Camp</option>
               </select>
             </label>
           </div>
         </div>
 
         <div className="grid gap-8 lg:grid-cols-[240px_1fr]">
-          <aside className={`${open ? "fixed inset-0 z-50 block bg-black/30" : "hidden"} lg:relative lg:inset-auto lg:z-auto lg:block lg:bg-transparent`}>
-            <div className={`${open ? "absolute right-0 h-full w-[min(88%,340px)] overflow-y-auto bg-white p-6" : ""} lg:sticky lg:top-36 lg:h-auto lg:w-auto lg:p-0`}>
+          <aside
+            className={`${
+              open ? "fixed inset-0 z-50 block bg-black/30" : "hidden"
+            } lg:relative lg:inset-auto lg:z-auto lg:block lg:bg-transparent`}
+          >
+            <div
+              className={`${
+                open
+                  ? "absolute right-0 h-full w-[min(88%,340px)] overflow-y-auto bg-white p-6"
+                  : ""
+              } lg:sticky lg:top-36 lg:h-auto lg:w-auto lg:p-0`}
+            >
               <div className="mb-6 flex items-center justify-between lg:hidden">
                 <strong className="font-display text-xl">Filters</strong>
-                <button onClick={() => setOpen(false)} aria-label="Close filters"><X /></button>
+                <button
+                  onClick={() => setOpen(false)}
+                  aria-label="Close filters"
+                >
+                  <X />
+                </button>
               </div>
               <div className="space-y-6">
                 {Object.entries(filterGroups).map(([group, values]) => (
-                  <details key={group} open className="border-b border-slate-200 pb-5">
+                  <details
+                    key={group}
+                    open
+                    className="border-b border-slate-200 pb-5"
+                  >
                     <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-bold text-slate-800">
-                      {group}<ChevronDown size={16} />
+                      {group}
+                      <ChevronDown size={16} />
                     </summary>
-                    <div className="mt-4 grid gap-3">
+                    <div className="mt-4 grid gap-2.5">
                       {values.map((value) => (
-                        <label key={value} className="flex items-center gap-3 text-sm text-slate-600">
+                        <label
+                          key={value}
+                          className="flex items-center gap-3 text-xs font-medium text-slate-600 cursor-pointer"
+                        >
                           <input
                             type="radio"
                             name={group}
@@ -159,67 +324,75 @@ function Explore() {
                   </details>
                 ))}
                 <div>
-                  <div className="flex justify-between text-sm font-bold">
-                    <span>Price range</span>
-                    <span className="text-green-900">NPR {price}</span>
+                  <div className="flex justify-between text-xs font-bold">
+                    <span>Max Price / Day</span>
+                    <span className="text-green-900 font-bold">NPR {price}</span>
                   </div>
                   <input
                     aria-label="Maximum rental price"
                     type="range"
                     min="100"
-                    max="1200"
+                    max="1500"
                     step="50"
                     value={price}
-                    onChange={(event) => setPrice(event.target.value)}
-                    className="mt-4 w-full accent-green-900"
+                    onChange={(event) => setPrice(Number(event.target.value))}
+                    className="mt-3 w-full accent-green-900"
                   />
-                </div>
-                <div>
-                  <p className="text-sm font-bold">Size</p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {["S", "M", "L", "XL"].map((size) => (
-                      <button key={size} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold hover:border-green-900">
-                        {size}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <p className="text-sm font-bold">Rental duration</p>
-                  <div className="mt-3 grid grid-cols-3 gap-2">
-                    {["1-3d", "4-7d", "8-14d"].map((duration) => (
-                      <button key={duration} className="rounded-lg border border-slate-200 px-2 py-2 text-xs font-semibold hover:border-green-900">
-                        {duration}
-                      </button>
-                    ))}
-                  </div>
                 </div>
               </div>
             </div>
           </aside>
 
           <section>
-            <AnimatePresence mode="popLayout">
-              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
-                {filtered.map((product) => (
-                  <motion.div key={product.id} layout initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-                    <ProductCard product={product} />
-                  </motion.div>
-                ))}
+            {loading ? (
+              <div className="flex min-h-[40vh] flex-col items-center justify-center">
+                <Loader2 className="h-8 w-8 animate-spin text-green-900" />
+                <p className="mt-3 text-xs text-slate-400 font-medium">
+                  Loading inventory from database...
+                </p>
               </div>
-            </AnimatePresence>
-            {filtered.length === 0 && (
-              <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-20 text-center">
-                <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-green-50 text-green-900"><Filter /></div>
-                <h2 className="mt-5 font-display text-2xl font-semibold">No gear matches your filters.</h2>
-                <p className="mt-2 text-slate-500">Try widening your search or clearing a category.</p>
-                <button
-                  onClick={() => { setQuery(""); setActiveChip("All gear"); setSelected({}); setPrice(1200); }}
-                  className="mt-6 rounded-full bg-green-900 px-5 py-3 text-sm font-semibold text-white"
-                >
-                  Clear all filters
-                </button>
-              </div>
+            ) : (
+              <>
+                <AnimatePresence mode="popLayout">
+                  <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-3">
+                    {filtered.map((product) => (
+                      <motion.div
+                        key={product.id || product.gear_id}
+                        layout
+                        initial={{ opacity: 0, y: 12 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0 }}
+                      >
+                        <ProductCard product={product} />
+                      </motion.div>
+                    ))}
+                  </div>
+                </AnimatePresence>
+                {filtered.length === 0 && (
+                  <div className="rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-20 text-center">
+                    <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-green-50 text-green-900">
+                      <Filter />
+                    </div>
+                    <h2 className="mt-5 font-display text-2xl font-semibold text-slate-800">
+                      No gear matches your filters.
+                    </h2>
+                    <p className="mt-2 text-sm text-slate-500">
+                      Try widening your search keywords or clearing filter selections.
+                    </p>
+                    <button
+                      onClick={() => {
+                        setQuery("");
+                        setActiveChip("All gear");
+                        setSelected({});
+                        setPrice(1500);
+                      }}
+                      className="mt-6 rounded-full bg-green-900 px-6 py-3 text-xs font-bold text-white shadow-md hover:bg-green-800"
+                    >
+                      Clear All Filters
+                    </button>
+                  </div>
+                )}
+              </>
             )}
           </section>
         </div>

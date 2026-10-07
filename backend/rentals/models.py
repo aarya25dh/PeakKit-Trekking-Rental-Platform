@@ -284,6 +284,8 @@ class Gear(models.Model):
     condition = models.CharField(max_length=20, choices=CONDITION_CHOICES, default='good')
     purchase_price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
     daily_rental_price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    image_url = models.CharField(max_length=500, blank=True, default='',
+                                  help_text="Relative URL to product image, e.g. /images/products/backpack1.jpg")
 
     quantity_total = models.IntegerField(default=1)
     quantity_available = models.IntegerField(default=1)
@@ -435,3 +437,115 @@ class CartItem(models.Model):
 
     def __str__(self):
         return f"{self.item_id} - {self.name} ({self.rental_days} days)"
+
+
+class AdventureKit(models.Model):
+    """
+    Adventure Kit bundle model composed of multiple Gear inventory items.
+    """
+    kit_id = models.CharField(max_length=100, unique=True, db_index=True)
+    slug = models.SlugField(max_length=150, unique=True, db_index=True)
+    name = models.CharField(max_length=255)
+    category = models.CharField(max_length=100, default="Trekking")
+    destination = models.CharField(max_length=255, blank=True)
+    difficulty = models.CharField(max_length=50, default="Moderate")
+    duration_days = models.CharField(max_length=50, default="7-10 days")
+    base_discount_percent = models.IntegerField(default=20)
+    banner_image = models.CharField(max_length=500, default="/images/packages/ebc-kit.jpg")
+    description = models.TextField(blank=True)
+    season = models.CharField(max_length=100, default="All year")
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Adventure Kit"
+        verbose_name_plural = "Adventure Kits"
+        ordering = ['name']
+
+    def __str__(self):
+        return f"{self.kit_id} - {self.name}"
+
+    @property
+    def total_daily_price(self):
+        """Calculates bundle daily rental price with applied bundle discount."""
+        from decimal import Decimal
+        total_undiscounted = sum(
+            (item.override_daily_price if item.override_daily_price is not None else item.gear.daily_rental_price) * item.quantity
+            for item in self.items.all() if item.gear
+        )
+        discount_factor = Decimal(str(1 - (self.base_discount_percent / 100.0)))
+        return round(total_undiscounted * discount_factor, 2)
+
+    @property
+    def undiscounted_daily_price(self):
+        """Original cumulative daily price of constituent gear."""
+        return sum(
+            (item.override_daily_price if item.override_daily_price is not None else item.gear.daily_rental_price) * item.quantity
+            for item in self.items.all() if item.gear
+        )
+
+    @property
+    def quantity_available(self):
+        """Dynamic availability calculated from lowest available constituent item."""
+        mandatory_items = self.items.filter(is_optional=False)
+        if not mandatory_items.exists():
+            return 0
+        counts = [
+            (item.gear.quantity_available // item.quantity)
+            for item in mandatory_items if item.gear and item.quantity > 0
+        ]
+        return min(counts) if counts else 0
+
+    @property
+    def is_available(self):
+        return self.quantity_available > 0
+
+
+class AdventureKitItem(models.Model):
+    """
+    Constituent gear item in an AdventureKit bundle.
+    """
+    kit = models.ForeignKey(AdventureKit, on_delete=models.CASCADE, related_name='items')
+    gear = models.ForeignKey(Gear, on_delete=models.CASCADE, related_name='kit_memberships')
+    quantity = models.IntegerField(default=1)
+    is_optional = models.BooleanField(default=False)
+    override_daily_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Adventure Kit Item"
+        verbose_name_plural = "Adventure Kit Items"
+        unique_together = ('kit', 'gear')
+
+    def __str__(self):
+        return f"{self.kit.name} -> {self.quantity}x {self.gear.name}"
+
+
+class OrderItem(models.Model):
+    """
+    Individual line item inside a confirmed or pending rental Order.
+    """
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='order_items')
+    gear = models.ForeignKey(Gear, on_delete=models.SET_NULL, null=True, blank=True, related_name='order_lines')
+    kit = models.ForeignKey(AdventureKit, on_delete=models.SET_NULL, null=True, blank=True, related_name='order_lines')
+    item_name = models.CharField(max_length=255)
+    quantity = models.IntegerField(default=1)
+    daily_rental_price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    subtotal = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Order Item"
+        verbose_name_plural = "Order Items"
+        ordering = ['id']
+
+    def __str__(self):
+        return f"{self.order.order_id} - {self.quantity}x {self.item_name}"
+
+    def save(self, *args, **kwargs):
+        from decimal import Decimal
+        days = self.order.rental_days if self.order and self.order.rental_days else 1
+        self.subtotal = Decimal(str(self.daily_rental_price)) * Decimal(str(self.quantity)) * Decimal(str(days))
+        super().save(*args, **kwargs)
+

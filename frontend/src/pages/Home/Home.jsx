@@ -12,14 +12,56 @@ import SustainabilitySection from "../../components/home/SustainabilitySection";
 import NewsletterCTA from "../../components/home/NewsletterCTA";
 import TrendingSection from "../../components/home/TrendingSection";
 import Testimonials from "../../components/home/Testimonials";
+import RecommendationsSection from "../../components/home/RecommendationsSection";
 import { categories, kits, stats } from "../../utils/constants";
+import SEO, { BASE_URL } from "../../components/common/SEO";
 
 const categoryList = categories;
 const steps = [[Compass, "Choose destination"], [Mountain, "Get a personal kit"], [PackageCheck, "Reserve your gear"], [TentTree, "Pick up or delivery"], [Heart, "Return after your trek"]];
 
 function Home() {
+  const homeSchema = {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Organization",
+        "@id": `${BASE_URL}/#organization`,
+        "name": "PeakKit",
+        "url": BASE_URL,
+        "logo": `${BASE_URL}/images/logo.png`,
+        "description": "Nepal's Premier Trekking & Camping Gear Rental Platform",
+        "address": {
+          "@type": "PostalAddress",
+          "streetAddress": "Thamel",
+          "addressLocality": "Kathmandu",
+          "addressCountry": "NP"
+        }
+      },
+      {
+        "@type": "WebSite",
+        "@id": `${BASE_URL}/#website`,
+        "url": BASE_URL,
+        "name": "PeakKit",
+        "publisher": {
+          "@id": `${BASE_URL}/#organization`
+        },
+        "potentialAction": {
+          "@type": "SearchAction",
+          "target": `${BASE_URL}/explore?q={search_term_string}`,
+          "query-input": "required name=search_term_string"
+        }
+      }
+    ]
+  };
+
   return (
     <div>
+      <SEO
+        title="Trekking & Expedition Gear Rental in Nepal"
+        description="Rent premium trekking & camping gear in Nepal. Curated kits for Everest & Annapurna trails. Reserve online with doorstep delivery."
+        canonical="/"
+        schema={homeSchema}
+      />
       <HeroCarousel />
       <AdventureSearchWidget />
       <TrustStrip />
@@ -149,7 +191,7 @@ function Home() {
       <section className="bg-[#f3f4f1] py-24">
         <div className="mx-auto max-w-7xl px-5 lg:px-8">
           <p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-600">
-            The PeakKit way
+            How it works
           </p>
           <h2 className="mt-3 font-display text-3xl font-semibold text-green-950 sm:text-4xl">
             A simpler way to get outside.
@@ -170,17 +212,18 @@ function Home() {
         </div>
       </section>
 
+      <RecommendationsSection />
       <CommunityGallery />
       <TrendingSection />
       <Testimonials />
 
-      {/* About PeakKit Section - Warm Cream Full-Width Section */}
+      {/* About Section - Warm Cream Full-Width Section */}
       <section className="bg-[#f4f5f0] py-24 border-t border-slate-200/50">
         <div className="mx-auto grid max-w-7xl gap-12 px-5 lg:grid-cols-2 lg:items-center lg:px-8">
           <div className="relative aspect-[1.2] overflow-hidden rounded-[2.5rem] bg-[#315843] shadow-lg border border-slate-200/80">
             <img
               src="/images/about/story.jpg"
-              alt="PeakKit team on a Nepal trail"
+              alt="Mountain outfitter team on a Nepal trail"
               loading="lazy"
               onError={(event) => {
                 event.currentTarget.style.opacity = "0";
@@ -202,17 +245,17 @@ function Home() {
 
           <div className="space-y-5">
             <span className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-3.5 py-1.5 text-xs font-bold uppercase tracking-[0.2em] text-amber-800 border border-amber-200">
-              About PeakKit
+              Our Vision
             </span>
             <h2 className="font-display text-4xl sm:text-5xl font-bold tracking-tight text-green-950 leading-tight">
               Built for every trail in Nepal.
             </h2>
             <p className="text-base leading-relaxed text-slate-600">
-              PeakKit helps trekkers access premium outdoor gear without buying
-              thousands of rupees worth of equipment.
+              We help trekkers access premium alpine gear without paying
+              thousands of rupees for gear they only use once.
             </p>
             <p className="text-base leading-relaxed text-slate-600">
-              Our mission is to make adventure affordable, sustainable, and
+              Our mission is to make mountain adventures affordable, sustainable, and
               accessible, one shared pack at a time.
             </p>
 

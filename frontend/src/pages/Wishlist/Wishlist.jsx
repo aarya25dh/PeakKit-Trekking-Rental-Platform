@@ -1,13 +1,16 @@
-import { Heart, ShoppingBag, Trash2 } from "lucide-react";
+import { Heart, LogIn, ShoppingBag, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import toast from "react-hot-toast";
 import ProductCard from "../../components/cards/ProductCard";
 import PageHero from "../../components/common/PageHero";
+import SEO from "../../components/common/SEO";
 import { HERO_IMAGES } from "../../data/imagePaths";
 import { useCart } from "../../context/CartContext";
 import { useWishlist } from "../../context/WishlistContext";
+import { useAuth } from "../../context/AuthContext";
 
 function Wishlist() {
+  const { isAuthenticated } = useAuth();
   const { items, removeItem, clearWishlist } = useWishlist();
   const { addItem } = useCart();
   const savings = items.reduce((sum, item) => sum + item.rentalPrice * 3, 0);
@@ -24,11 +27,58 @@ function Wishlist() {
     toast.success("All items moved to cart");
   };
 
+  if (!isAuthenticated) {
+    return (
+      <main>
+        <SEO
+          title="Saved Gear Wishlist"
+          description="Your saved trekking and camping gear list on PeakKit."
+          canonical="/wishlist"
+          noIndex={true}
+        />
+        <PageHero
+          image={HERO_IMAGES.wishlistMountains}
+          breadcrumb="SAVED ITEMS / WISHLIST"
+          title="Your Saved Gear"
+          subtitle="Keep your favourite trekking gear in one place and reserve it whenever you're ready."
+        />
+        <div className="mx-auto max-w-7xl px-5 py-16 lg:px-8">
+          <div className="mx-auto max-w-md rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center shadow-xs">
+            <div className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-amber-50 text-amber-600">
+              <Heart size={32} />
+            </div>
+            <h2 className="mt-5 font-display text-2xl font-semibold text-green-950">
+              Please log in to view your wishlist.
+            </h2>
+            <p className="mt-2 text-sm text-slate-500">
+              Sign in to save products, build custom trekking kits, and track your gear preferences.
+            </p>
+            <div className="mt-6 flex justify-center gap-3">
+              <Link
+                to="/login"
+                className="inline-flex items-center gap-2 rounded-full bg-green-900 px-6 py-3 text-sm font-bold text-white transition hover:bg-green-800 shadow-md"
+              >
+                <LogIn size={16} />
+                Log In
+              </Link>
+            </div>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main>
+      <SEO
+        title="Saved Gear Wishlist"
+        description="Your saved trekking and camping gear list on PeakKit."
+        canonical="/wishlist"
+        noIndex={true}
+      />
       <PageHero
         image={HERO_IMAGES.wishlistMountains}
-        breadcrumb="PEAKKIT / WISHLIST"
+        breadcrumb="SAVED ITEMS / WISHLIST"
         title="Your Saved Gear"
         subtitle="Keep your favourite trekking gear in one place and reserve it whenever you're ready."
       />
@@ -88,9 +138,11 @@ function Wishlist() {
             ))}
           </div>
         ) : (
-          <div className="mt-10 rounded-2xl border border-dashed border-slate-300 bg-white p-16 text-center">
-            <Heart className="mx-auto text-amber-500" size={34} />
-            <h2 className="mt-5 font-display text-2xl font-semibold">
+          <div className="mt-10 rounded-3xl border border-dashed border-slate-300 bg-white p-16 text-center shadow-xs">
+            <div className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-amber-50 text-amber-600">
+              <Heart size={32} />
+            </div>
+            <h2 className="mt-5 font-display text-2xl font-semibold text-green-950">
               Nothing saved yet.
             </h2>
             <p className="mt-2 text-slate-500">

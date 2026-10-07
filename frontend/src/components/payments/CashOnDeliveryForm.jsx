@@ -66,7 +66,7 @@ function CashOnDeliveryForm({
         instructions,
         amountDue: amount,
       });
-    }, 1100);
+    }, 300);
   };
 
   return (

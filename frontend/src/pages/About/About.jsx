@@ -1,7 +1,10 @@
 import { ArrowRight, Heart, Leaf, ShieldCheck, Users } from "lucide-react";
 import { Link } from "react-router-dom";
 import PageHero from "../../components/common/PageHero";
+import SEO from "../../components/common/SEO";
 import { HERO_IMAGES } from "../../data/imagePaths";
+
+
 
 const values = [
   [Heart, "Accessibility", "Adventure should feel open to everyone."],
@@ -13,11 +16,16 @@ const values = [
 function About() {
   return (
     <main>
+      <SEO
+        title="Our Story"
+        description="PeakKit was born in Nepal to make trekking affordable, sustainable, and accessible through quality reusable outdoor gear. Learn who we are and why we do it."
+        canonical="/about"
+      />
       <PageHero
         image={HERO_IMAGES.aboutHimalayas}
-        breadcrumb="PEAKKIT / OUR STORY"
+        breadcrumb="ABOUT / OUR STORY"
         title="Born in Nepal. Built for Every Adventure."
-        subtitle="PeakKit exists to make trekking more affordable, sustainable and accessible through reusable outdoor gear."
+        subtitle="Crafting an accessible, sustainable way for adventurers to experience the Himalayas without heavy gear investments."
       />
 
       <section className="mx-auto grid max-w-7xl gap-12 px-5 py-24 lg:grid-cols-2 lg:px-8">
@@ -31,8 +39,8 @@ function About() {
         </div>
         <div className="space-y-5 leading-7 text-slate-600">
           <p>
-            PeakKit started with one belief: adventure should not require owning
-            a cupboard full of specialist gear.
+            Our initiative started with one belief: exploring the high mountains
+            should never require buying costly single-use gear.
           </p>
           <p>
             Inspired by Nepal's local gear communities, we connect trekkers with

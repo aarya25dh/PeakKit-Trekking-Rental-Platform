@@ -19,18 +19,16 @@ function PaypalForm({ amount, onSuccess }) {
     setProcessing(true);
     setTimeout(() => {
       setAuthenticated(true);
-      setTimeout(() => {
-        setProcessing(false);
-        const txnId = `PAYPAL-TXN-${Math.floor(100000 + Math.random() * 900000)}`;
-        onSuccess({
-          method: "PayPal",
-          txnId,
-          customerName: email.split("@")[0] || "PayPal Customer",
-          email,
-          phone: phone || "+977-9800000000",
-        });
-      }, 900);
-    }, 1000);
+      setProcessing(false);
+      const txnId = `PAYPAL-TXN-${Math.floor(100000 + Math.random() * 900000)}`;
+      onSuccess({
+        method: "PayPal",
+        txnId,
+        customerName: email.split("@")[0] || "PayPal Customer",
+        email,
+        phone: phone || "+977-9800000000",
+      });
+    }, 300);
   };
 
   return (

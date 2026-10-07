@@ -18,9 +18,18 @@ import toast from "react-hot-toast";
 import { LOGO_IMAGES } from "../../data/imagePaths";
 import { useCart } from "../../context/CartContext";
 import { useWishlist } from "../../context/WishlistContext";
-import { useNotifications } from "../../context/NotificationContext";
-import { useAuth } from "../../context/AuthContext";
-import { products, destinationsCatalog } from "../../utils/constants";
+import { searchAPI } from "../../services/api.js";
+import { analytics } from "../../services/analytics.js";
+import { useAuth } from "../../context/AuthContext.jsx";
+import { useNotifications } from "../../context/NotificationContext.jsx";
+
+const POPULAR_SEARCHES = [
+  "Everest Base Camp Kit",
+  "Down Jacket -20°C",
+  "Osprey Atmos AG 65L",
+  "Langtang Trek",
+  "Alpine Tent 2P",
+];
 
 const links = [
   ["Explore Gear", "/explore"],
@@ -49,25 +58,7 @@ function CountLink({ to, label, children, count }) {
   );
 }
 
-// Adventure kits data for search (mirrors AdventureKit.jsx)
-const allKits = [
-  ["Everest Base Camp", "Challenging", "14–16 days", "NPR 12,500"],
-  ["Annapurna Base Camp", "Moderate", "10–12 days", "NPR 8,900"],
-  ["Mardi Himal", "Moderate", "5–7 days", "NPR 5,600"],
-  ["Langtang Valley", "Moderate", "7–9 days", "NPR 6,800"],
-  ["Gosaikunda", "Moderate", "5–7 days", "NPR 5,200"],
-  ["Ama Yangri", "Easy", "2–3 days", "NPR 2,400"],
-  ["Upper Mustang", "Challenging", "12–14 days", "NPR 11,800"],
-  ["Manaslu Circuit", "Challenging", "16–18 days", "NPR 14,500"],
-  ["Shivapuri Hike", "Easy", "1 day", "NPR 1,200"],
-  ["Nagarkot Sunrise", "Easy", "1 day", "NPR 900"],
-  ["Champadevi", "Easy", "1 day", "NPR 850"],
-  ["Phulchowki", "Moderate", "1 day", "NPR 1,400"],
-  ["Weekend Camping", "Easy", "2 days", "NPR 3,800"],
-  ["Family Camping", "Easy", "2 days", "NPR 5,600"],
-  ["Solo Camping", "Moderate", "2 days", "NPR 3,200"],
-  ["Luxury Camping", "Easy", "2 days", "NPR 8,500"],
-];
+
 
 function Navbar() {
   const navigate = useNavigate();
@@ -81,7 +72,10 @@ function Navbar() {
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
   const searchRef = useRef(null);
+  const debounceRef = useRef(null);
 
   const { items: cartItems } = useCart();
   const { items: wishlistItems } = useWishlist();
@@ -105,53 +99,52 @@ function Navbar() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Build search results from all corpora
-  const searchResults = (() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return [];
-    const results = [];
-
-    // Explore Gear products
-    products.forEach((p) => {
-      if (
-        `${p.name} ${p.brand} ${p.category} ${p.description || ""}`.toLowerCase().includes(q)
-      ) {
-        results.push({ type: "gear", label: p.name, sub: `${p.category} · ${p.brand}`, to: `/product/${p.id}` });
+  // Debounced server-side search
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (!q) {
+      setSearchResults([]);
+      setSearchOpen(false);
+      setSearchLoading(false);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      return;
+    }
+    setSearchLoading(true);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const res = await searchAPI.search(q);
+        const data = res.data;
+        const results = [];
+        (data.gear || []).forEach((g) =>
+          results.push({ type: "gear", label: g.name, sub: `${g.category} · ${g.brand}`, to: `/product/${g.id}` })
+        );
+        (data.kits || []).forEach((k) =>
+          results.push({ type: "kit", label: k.name, sub: "Adventure Kit", to: k.url || `/adventure-kit/${k.name.toLowerCase().replaceAll(" ", "-")}` })
+        );
+        (data.categories || []).forEach((c) =>
+          results.push({ type: "category", label: c.name, sub: "Browse category", to: c.url || `/explore?category=${encodeURIComponent(c.name)}` })
+        );
+        (data.destinations || []).forEach((d) =>
+          results.push({ type: "destination", label: d.name, sub: "Destination", to: d.url || `/adventure-kit/${d.name.toLowerCase().replaceAll(" ", "-")}` })
+        );
+        setSearchResults(results.slice(0, 8));
+        setSearchOpen(true);
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setSearchLoading(false);
       }
-    });
+    }, 300);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [searchQuery]);
 
-    // Adventure Kits
-    allKits.forEach(([name, difficulty, duration]) => {
-      if (`${name} ${difficulty} ${duration}`.toLowerCase().includes(q)) {
-        results.push({
-          type: "kit",
-          label: `${name} Kit`,
-          sub: `${difficulty} · ${duration}`,
-          to: `/adventure-kit/${name.toLowerCase().replaceAll(" ", "-")}`,
-        });
-      }
-    });
-
-    // Destinations
-    destinationsCatalog.forEach((d) => {
-      if (`${d.name} ${d.difficulty} ${d.duration}`.toLowerCase().includes(q)) {
-        results.push({
-          type: "destination",
-          label: d.name,
-          sub: `${d.difficulty} · ${d.duration}`,
-          to: `/adventure-kit/${d.name.toLowerCase().replaceAll(" ", "-")}`,
-        });
-      }
-    });
-
-    return results.slice(0, 8);
-  })();
-
-  const typeLabel = { gear: "Gear", kit: "Kit", destination: "Destination" };
+  const typeLabel = { gear: "Gear", kit: "Kit", destination: "Destination", category: "Category" };
   const typeColor = {
     gear: "bg-amber-100 text-amber-800",
     kit: "bg-green-100 text-green-800",
     destination: "bg-blue-100 text-blue-800",
+    category: "bg-stone-100 text-stone-700",
   };
 
   const handleLogout = async () => {
@@ -169,15 +162,15 @@ function Navbar() {
       }`}
     >
       <div
-        className={`mx-auto flex max-w-7xl xl:max-w-[1400px] 2xl:max-w-[1500px] items-center justify-between px-4 sm:px-6 lg:px-8 ${
+        className={`mx-auto flex max-w-7xl xl:max-w-[1440px] 2xl:max-w-[1560px] items-center justify-between gap-4 px-4 sm:px-6 lg:px-8 ${
           scrolled ? "h-16" : "h-[72px]"
         }`}
       >
-        {/* Left Section: Logo, Navigation links (equal spacing), and Search bar (immediately after Community) */}
-        <div className="flex shrink-0 items-center gap-4 xl:gap-5">
+        {/* Left Section: Logo */}
+        <div className="flex shrink-0 items-center">
           <Link
             to="/"
-            className="flex shrink-0 items-center gap-0.5 text-green-900"
+            className="flex shrink-0 items-center gap-1.5 text-green-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-800 rounded-xl"
           >
             <img
               src={LOGO_IMAGES.logo}
@@ -188,37 +181,40 @@ function Navbar() {
                 event.currentTarget.nextElementSibling.style.display = "flex";
               }}
             />
-            <span className="hidden h-9 w-9 items-center justify-center rounded-xl bg-green-900 text-white">
+            <span className="hidden h-9 w-9 items-center justify-center rounded-xl bg-green-900 text-white shadow-xs">
               <Compass size={21} />
             </span>
             <span className="font-display text-xl font-bold tracking-tight">
               PEAKKIT
             </span>
           </Link>
+        </div>
 
-          {/* Navigation links with equal spacing */}
-          <nav className="hidden shrink-0 items-center gap-4 xl:gap-5 lg:flex">
-            {links.map(([label, path]) => (
-              <NavLink
-                key={path}
-                to={path}
-                className={({ isActive }) =>
-                  `whitespace-nowrap text-sm font-semibold transition ${
-                    isActive
-                      ? "text-green-900 font-bold"
-                      : "text-slate-500 hover:text-green-900"
-                  }`
-                }
-              >
-                {label}
-              </NavLink>
-            ))}
-          </nav>
+        {/* Center Section: Navigation links evenly distributed */}
+        <nav className="hidden shrink-0 items-center justify-center gap-4 xl:gap-6 lg:flex">
+          {links.map(([label, path]) => (
+            <NavLink
+              key={path}
+              to={path}
+              className={({ isActive }) =>
+                `whitespace-nowrap text-sm font-semibold transition hover:-translate-y-0.5 ${
+                  isActive
+                    ? "text-green-900 font-bold"
+                    : "text-slate-600 hover:text-green-900"
+                }`
+              }
+            >
+              {label}
+            </NavLink>
+          ))}
+        </nav>
 
-          {/* Search bar with live results dropdown */}
-          <div ref={searchRef} className="relative hidden xl:flex">
-            <label className="flex shrink-0 items-center gap-2 rounded-full bg-stone-100 px-3 py-2">
-              <Search size={16} className="shrink-0 text-slate-400" />
+        {/* Right Section: Search Bar (~300px) + Wishlist + Cart + Auth */}
+        <div className="hidden shrink-0 items-center justify-end gap-3 md:flex">
+          {/* Search bar (~300px width) with live results dropdown */}
+          <div ref={searchRef} className="relative">
+            <label className="flex w-60 xl:w-72 items-center gap-2 rounded-full bg-stone-100/90 border border-stone-200/80 px-3.5 py-2 transition focus-within:border-green-800 focus-within:bg-white focus-within:ring-2 focus-within:ring-green-800/20">
+              <Search size={15} className="shrink-0 text-slate-400" />
               <input
                 aria-label="Search trekking gear"
                 placeholder="Search gear or destinations"
@@ -236,13 +232,13 @@ function Navbar() {
                     setSearchQuery("");
                   }
                 }}
-                className="w-36 xl:w-44 bg-transparent text-xs outline-none placeholder:text-slate-400"
+                className="w-full bg-transparent text-xs text-slate-800 outline-none placeholder:text-slate-400"
               />
               {searchQuery && (
                 <button
                   type="button"
                   onClick={() => { setSearchQuery(""); setSearchOpen(false); }}
-                  className="shrink-0 text-slate-400 hover:text-slate-600"
+                  className="shrink-0 rounded-full p-0.5 text-slate-400 hover:bg-stone-200/60 hover:text-slate-600"
                 >
                   <X size={13} />
                 </button>
@@ -250,42 +246,81 @@ function Navbar() {
             </label>
 
             {/* Results dropdown */}
-            {searchOpen && searchResults.length > 0 && (
-              <div className="absolute left-0 top-12 z-50 w-80 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
-                {searchResults.map((result, i) => (
-                  <button
-                    key={i}
-                    type="button"
-                    onClick={() => {
-                      navigate(result.to);
-                      setSearchOpen(false);
-                      setSearchQuery("");
-                    }}
-                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-stone-50"
-                  >
-                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${typeColor[result.type]}`}>
-                      {typeLabel[result.type]}
+            {searchOpen && (
+              <div className="absolute right-0 top-12 z-50 w-80 rounded-2xl border border-stone-200 bg-white p-2.5 shadow-xl shadow-stone-200/80">
+                {searchResults.length > 0 ? (
+                  <div className="space-y-1">
+                    <span className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                      Search Results
                     </span>
-                    <div className="min-w-0">
-                      <p className="truncate text-xs font-semibold text-slate-800">{result.label}</p>
-                      <p className="truncate text-[10px] text-slate-400">{result.sub}</p>
+                    {searchResults.map((result, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => {
+                          analytics.trackSearch(searchQuery);
+                          navigate(result.to);
+                          setSearchOpen(false);
+                          setSearchQuery("");
+                        }}
+                        className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition hover:bg-stone-50"
+                      >
+                        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${typeColor[result.type]}`}>
+                          {typeLabel[result.type]}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="truncate text-xs font-semibold text-slate-800">{result.label}</p>
+                          <p className="truncate text-[10px] text-slate-400">{result.sub}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ) : !searchQuery.trim() ? (
+                  <div className="p-2 space-y-3">
+                    <div>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-2">
+                        Popular Searches
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {POPULAR_SEARCHES.map((term) => (
+                          <button
+                            key={term}
+                            type="button"
+                            onClick={() => {
+                              analytics.trackSearch(term);
+                              navigate(`/explore?q=${encodeURIComponent(term)}`);
+                              setSearchOpen(false);
+                            }}
+                            className="rounded-full bg-stone-100 hover:bg-green-50 hover:text-green-900 px-2.5 py-1 text-[11px] font-medium text-slate-700 transition"
+                          >
+                            {term}
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {/* No results */}
-            {searchOpen && searchQuery.trim() && searchResults.length === 0 && (
-              <div className="absolute left-0 top-12 z-50 w-72 rounded-2xl border border-slate-200 bg-white px-4 py-5 text-center shadow-xl">
-                <p className="text-xs text-slate-500">No results for <strong>"{searchQuery}"</strong></p>
+                  </div>
+                ) : searchLoading ? (
+                  <div className="px-4 py-5 text-center">
+                    <p className="text-xs text-slate-400">Searching mountain inventory…</p>
+                  </div>
+                ) : (
+                  <div className="px-4 py-5 text-center">
+                    <p className="text-xs text-slate-500">No results for <strong>"{searchQuery}"</strong></p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigate(`/explore?q=${encodeURIComponent(searchQuery)}`);
+                        setSearchOpen(false);
+                      }}
+                      className="mt-2 text-xs font-bold text-emerald-800 hover:underline"
+                    >
+                      Search full catalog →
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
-        </div>
-
-        {/* Right Section: Icons (equal spacing) and Auth Group (Login/Profile & Join Button on the far right) */}
-        <div className="hidden shrink-0 items-center justify-end gap-3 md:flex">
           {/* Icons: Wishlist | Cart | Notification with equal spacing */}
           <div className="flex items-center gap-1.5">
             <CountLink
@@ -539,6 +574,24 @@ function Navbar() {
       {/* Mobile Drawer */}
       {open && (
         <div className="border-t border-slate-200 bg-white px-5 py-5 md:hidden">
+          {/* Mobile search */}
+          <div className="mb-4">
+            <label className="flex items-center gap-2 rounded-2xl bg-stone-100 px-3.5 py-2.5 border border-stone-200">
+              <Search size={16} className="text-slate-400" />
+              <input
+                placeholder="Search gear or destinations..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && searchQuery.trim()) {
+                    navigate(`/explore?q=${encodeURIComponent(searchQuery.trim())}`);
+                    setOpen(false);
+                  }
+                }}
+                className="w-full bg-transparent text-sm text-slate-800 outline-none placeholder:text-slate-400"
+              />
+            </label>
+          </div>
           {isAuthenticated && user && (
             <div className="mb-4 flex items-center gap-3 rounded-2xl bg-stone-50 p-3">
               <span className="grid h-10 w-10 place-items-center rounded-full bg-green-900 text-sm font-bold text-white">

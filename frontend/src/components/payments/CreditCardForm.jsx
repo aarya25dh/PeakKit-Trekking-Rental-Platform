@@ -84,7 +84,7 @@ function CreditCardForm({ amount, onSuccess }) {
         billingAddress: `${address}, ${zip}, ${country}`,
         cardLast4: cardNumber.replace(/\s/g, "").slice(-4) || "4242",
       });
-    }, 1200);
+    }, 300);
   };
 
   return (
