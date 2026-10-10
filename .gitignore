@@ -35,13 +35,15 @@ htmlcov/
 # =========================
 backend/db.sqlite3
 
-# User uploaded media (keep folder, ignore contents)
-backend/media/*
-!backend/media/.gitkeep
+# User uploaded media
+backend/media/
 
 # Collected static files
-backend/staticfiles/*
-!backend/staticfiles/.gitkeep
+backend/static/
+backend/staticfiles/
+
+# Local HTTPS certificates
+certs/*.pem
 
 # Logs
 *.log
