@@ -42,8 +42,6 @@ backend/media/
 backend/static/
 backend/staticfiles/
 
-# Local HTTPS certificates
-certs/*.pem
 
 # Logs
 *.log
@@ -76,3 +74,6 @@ frontend/.cache/
 *.tmp
 *.swp
 *.swo
+# Local HTTPS certificates
+certs/*.pem
+frontend/certs/*.pem
